@@ -1,0 +1,11 @@
+# Единые переносы строк в репозитории, чтобы файлы одинаково вели себя на Windows и Linux (VPS).
+* text=auto eol=lf
+
+# Windows-скрипты должны оставаться с CRLF.
+*.bat text eol=crlf
+
+# gradlew — это shell-скрипт, на Linux ему нужен LF, иначе не запустится.
+gradlew text eol=lf
+
+# Бинарники не трогать.
+*.jar binary
