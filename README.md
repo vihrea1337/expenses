@@ -25,3 +25,9 @@
 ## Стек
 
 Ktor · PostgreSQL (через Exposed) · kotlinx.serialization · webhook Telegram за nginx на VPS.
+
+## Документация
+
+- [`CLAUDE.md`](CLAUDE.md) — точка входа: что за проект, формат работы, команды.
+- [`docs/architecture.md`](docs/architecture.md) — архитектура, решения и почему, инфраструктура, глоссарий.
+- [`docs/roadmap.md`](docs/roadmap.md) — план по срезам, статус и «продолжить отсюда».
