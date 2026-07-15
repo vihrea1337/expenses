@@ -1,0 +1,20 @@
+# --- Gradle ---
+.gradle/
+build/
+# (обёртка gradle-wrapper.jar лежит в gradle/wrapper и коммитится — она нужна)
+
+# --- IntelliJ IDEA / Android Studio ---
+.idea/
+*.iml
+.kotlin/
+
+# --- Локальные настройки и СЕКРЕТЫ (не коммитить!) ---
+local.properties
+*.env
+.env
+secrets.properties
+application-local.conf
+
+# --- Прочее ---
+.DS_Store
+*.log
