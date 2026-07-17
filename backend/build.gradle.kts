@@ -38,6 +38,19 @@ dependencies {
     // Логгер — чтобы видеть, что происходит на сервере.
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
+    // --- Работа с базой данных ---
+    // Exposed — Kotlin-обёртка над SQL: таблицы описываем Kotlin-объектами,
+    // запросы пишем на Kotlin (типобезопасно), а не строками SQL.
+    val exposedVersion = "0.57.0"
+    implementation("org.jetbrains.exposed:exposed-core:$exposedVersion")     // ядро: типы колонок, DSL запросов
+    implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")     // мост Exposed → JDBC (реальное выполнение запросов)
+    implementation("org.jetbrains.exposed:exposed-java-time:$exposedVersion") // колонки дата/время на java.time
+    // JDBC-драйвер PostgreSQL — как JVM физически общается именно с Postgres.
+    implementation("org.postgresql:postgresql:42.7.4")
+    // HikariCP — пул соединений: держит готовые подключения к БД и переиспользует их
+    // (открывать новое подключение на каждый запрос дорого). Понадобится на шаге подключения.
+    implementation("com.zaxxer:HikariCP:6.2.1")
+
     // Для будущих тестов сервера (поднимают Ktor без реального порта).
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test"))
