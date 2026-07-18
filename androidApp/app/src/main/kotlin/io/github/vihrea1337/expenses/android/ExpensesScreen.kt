@@ -1,7 +1,9 @@
 package io.github.vihrea1337.expenses.android
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -77,11 +84,11 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     val filtered = state.expenses.filter { inPeriod(it.createdAt, periodIndex) }
     val total = filtered.sumOf { it.amount }
     // Группируем по обобщённой категории от ИИ (если ещё не проставлена — «без категории»).
+    // Показываем все группы (их не больше ~10), чтобы доли складывались в целое кольцо.
     val breakdown = filtered
         .groupBy { it.categoryGroup ?: "без категории" }
         .map { (group, list) -> group to list.sumOf { it.amount } }
         .sortedByDescending { it.second }
-        .take(8)
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Мои траты") }) },
@@ -222,51 +229,93 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     }
 }
 
-/** Разбивка по категориям: строка "категория — сумма · доля%" с полоской. */
-@Composable
-private fun BreakdownSection(rows: List<Pair<String, Double>>, total: Double) {
-    Column(Modifier.padding(vertical = 8.dp)) {
-        Text("По категориям", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.height(4.dp))
-        rows.forEach { (cat, sum) ->
-            val fraction = if (total > 0) (sum / total).toFloat() else 0f
-            val percent = (fraction * 100).roundToInt()
-            Column(Modifier.padding(vertical = 6.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(cat, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "${formatAmount(sum)} ₽ · $percent%",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                CategoryBar(fraction)
-            }
-        }
+// Категориальная палитра (референс dataviz-гайда, провалидирована): 8 хуёв в фиксированном
+// порядке, отдельно под светлую и тёмную поверхность. Цвет закреплён ЗА категорией (по сущности,
+// не по величине). «прочее», «без категории» и всё вне списка — серый.
+private val CATEGORY_ORDER = listOf(
+    "еда", "транспорт", "дом", "развлечения", "здоровье", "одежда", "связь", "подарки",
+)
+private val CATEGORY_HUES_LIGHT = listOf(
+    Color(0xFF2A78D6), Color(0xFF008300), Color(0xFFE87BA4), Color(0xFFEDA100),
+    Color(0xFF1BAF7A), Color(0xFFEB6834), Color(0xFF4A3AA7), Color(0xFFE34948),
+)
+private val CATEGORY_HUES_DARK = listOf(
+    Color(0xFF3987E5), Color(0xFF008300), Color(0xFFD55181), Color(0xFFC98500),
+    Color(0xFF199E70), Color(0xFFD95926), Color(0xFF9085E9), Color(0xFFE66767),
+)
+private val CATEGORY_GRAY_LIGHT = Color(0xFF9AA0A6)
+private val CATEGORY_GRAY_DARK = Color(0xFF6B7280)
+
+/** Фиксированный цвет категории. */
+private fun categoryColor(group: String, dark: Boolean): Color {
+    val index = CATEGORY_ORDER.indexOf(group)
+    return when {
+        index >= 0 && dark -> CATEGORY_HUES_DARK[index]
+        index >= 0 -> CATEGORY_HUES_LIGHT[index]
+        dark -> CATEGORY_GRAY_DARK
+        else -> CATEGORY_GRAY_LIGHT
     }
 }
 
-/** Тонкая полоска-индикатор доли категории. */
+/** Разбивка по категориям: кольцевая (donut) диаграмма + легенда (сумма и доля). */
 @Composable
-private fun CategoryBar(fraction: Float) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.primary),
-        )
+private fun BreakdownSection(rows: List<Pair<String, Double>>, total: Double) {
+    val dark = isSystemInDarkTheme()
+    Column(Modifier.padding(vertical = 8.dp)) {
+        Text("По категориям", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(12.dp))
+
+        // Кольцо: каждый сектор — доля категории; в центре — общая сумма.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(170.dp)) {
+                val strokeWidth = 34.dp.toPx()
+                val diameter = size.minDimension - strokeWidth
+                val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                val arcSize = Size(diameter, diameter)
+                var startAngle = -90f // начинаем сверху
+                rows.forEach { (group, sum) ->
+                    val sweep = if (total > 0) (sum / total * 360.0).toFloat() else 0f
+                    drawArc(
+                        color = categoryColor(group, dark),
+                        startAngle = startAngle,
+                        sweepAngle = sweep,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                    )
+                    startAngle += sweep
+                }
+            }
+            Text("${formatAmount(total)} ₽", style = MaterialTheme.typography.titleMedium)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Легенда: цветной маркер + название + сумма и доля (личность не только цветом).
+        rows.forEach { (group, sum) ->
+            val percent = if (total > 0) (sum / total * 100).roundToInt() else 0
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(12.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(categoryColor(group, dark)),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(group, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(
+                    "${formatAmount(sum)} ₽ · $percent%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

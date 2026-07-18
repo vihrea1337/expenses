@@ -67,6 +67,13 @@
         .bd-head span:last-child { color: var(--muted); white-space: nowrap; }
         .bd-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
         .bd-bar > div { height: 100%; background: var(--accent); }
+        .donut { width: 170px; height: 170px; border-radius: 50%; margin: 8px auto 16px; position: relative; }
+        .donut-hole {
+            position: absolute; inset: 34px; border-radius: 50%; background: var(--card);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .donut-hole span { font-weight: 600; font-size: 15px; }
+        .dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 8px; vertical-align: middle; }
         .row {
             display: flex; align-items: center; gap: 12px;
             padding: 12px 4px; border-bottom: 1px solid var(--border);
@@ -186,6 +193,18 @@
 
     function money(v) { return Number.isInteger(v) ? String(v) : String(v); }
 
+    // Категориальная палитра (референс dataviz-гайда): 8 хуёв в фиксированном порядке под
+    // светлую/тёмную тему; цвет закреплён за категорией. Остальное («прочее», «без категории») — серый.
+    const CAT_ORDER = ['еда', 'транспорт', 'дом', 'развлечения', 'здоровье', 'одежда', 'связь', 'подарки'];
+    const CAT_HUES_LIGHT = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948'];
+    const CAT_HUES_DARK = ['#3987e5', '#008300', '#d55181', '#c98500', '#199e70', '#d95926', '#9085e9', '#e66767'];
+    function catColor(group) {
+        const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const i = CAT_ORDER.indexOf(group);
+        if (i >= 0) return (dark ? CAT_HUES_DARK : CAT_HUES_LIGHT)[i];
+        return dark ? '#6b7280' : '#9aa0a6';
+    }
+
     function fmtDate(iso) {
         const d = new Date(iso);
         if (isNaN(d)) return iso.slice(0, 16);
@@ -288,7 +307,7 @@
         totalEl.innerHTML = `Всего за период: <b>${money(sum)} ₽</b> · ${data.length} трат`;
     }
 
-    // Разбивка по обобщённым категориям (от ИИ): топ-8 с суммой, долей и полоской.
+    // Разбивка по обобщённым категориям (от ИИ): кольцевая диаграмма + легенда.
     function renderBreakdown(data) {
         if (data.length === 0) { breakdownEl.classList.add('hidden'); return; }
         breakdownEl.classList.remove('hidden');
@@ -298,16 +317,32 @@
             const g = e.categoryGroup || 'без категории';
             map[g] = (map[g] || 0) + e.amount;
         });
-        const rows = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        // Все группы (их не больше ~10), по убыванию — чтобы доли складывались в целое кольцо.
+        const groups = Object.entries(map).sort((a, b) => b[1] - a[1]);
+
+        // Кольцо через conic-gradient: доли идут подряд.
+        let acc = 0;
+        const stops = groups.map(([g, sum]) => {
+            const from = total > 0 ? acc / total * 100 : 0;
+            acc += sum;
+            const to = total > 0 ? acc / total * 100 : 0;
+            return `${catColor(g)} ${from}% ${to}%`;
+        }).join(', ');
+
+        // Легенда: цветной маркер + название + сумма и доля.
+        const legend = groups.map(([g, sum]) => {
+            const pct = total > 0 ? Math.round(sum / total * 100) : 0;
+            return `<div class="bd-row"><div class="bd-head">
+                <span><span class="dot" style="background:${catColor(g)}"></span>${escapeHtml(g)}</span>
+                <span>${money(sum)} ₽ · ${pct}%</span></div></div>`;
+        }).join('');
+
         breakdownEl.innerHTML = `<div class="topbar"><span class="bd-title">По категориям</span>
-            <button class="linkbtn" id="reclassifyBtn" title="Определить категории через ИИ">↻ ИИ</button></div>`
-            + rows.map(([cat, sum]) => {
-                const pct = total > 0 ? Math.round(sum / total * 100) : 0;
-                return `<div class="bd-row">
-                    <div class="bd-head"><span>${escapeHtml(cat)}</span><span>${money(sum)} ₽ · ${pct}%</span></div>
-                    <div class="bd-bar"><div style="width:${pct}%"></div></div>
-                </div>`;
-            }).join('');
+            <button class="linkbtn" id="reclassifyBtn" title="Определить категории через ИИ">↻ ИИ</button></div>
+            <div class="donut" style="background: conic-gradient(${stops})">
+                <div class="donut-hole"><span>${money(total)} ₽</span></div>
+            </div>
+            ${legend}`;
         document.getElementById('reclassifyBtn').addEventListener('click', reclassify);
     }
 
