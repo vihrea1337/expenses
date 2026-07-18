@@ -1,5 +1,7 @@
 package io.github.vihrea1337.expenses
 
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -53,5 +55,13 @@ object ExpenseRepository {
             note = new.note,
             createdAt = now.toString(),
         )
+    }
+
+    /**
+     * Удалить трату по id. Возвращает true, если строка была найдена и удалена,
+     * false — если траты с таким id нет. deleteWhere возвращает число удалённых строк.
+     */
+    fun delete(id: UUID): Boolean = transaction {
+        Expenses.deleteWhere { Expenses.id eq id } > 0
     }
 }

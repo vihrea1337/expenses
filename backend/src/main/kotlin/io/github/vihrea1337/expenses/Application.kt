@@ -2,14 +2,17 @@ package io.github.vihrea1337.expenses
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.http.content.staticResources
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
@@ -17,6 +20,7 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.util.UUID
 
 /**
  * Точка входа. Поднимает HTTP-сервер на движке Netty.
@@ -64,10 +68,29 @@ fun Application.module() {
             call.respond(saved)
         }
 
+        // Удалить трату по id: DELETE /api/expenses/<id>.
+        // {id} в пути — переменная, её значение достаём через call.parameters["id"].
+        delete("/api/expenses/{id}") {
+            val idParam = call.parameters["id"]
+            // id должен быть корректным UUID; если нет — 400 (неверный запрос).
+            val uuid = runCatching { UUID.fromString(idParam) }.getOrNull()
+            if (uuid == null) {
+                call.respond(HttpStatusCode.BadRequest, "Некорректный id")
+                return@delete
+            }
+            val removed = ExpenseRepository.delete(uuid)
+            // 204 No Content — удалили; 404 — траты с таким id не было.
+            call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+        }
+
         // Проверка "жив ли сервер". Открой в браузере http://127.0.0.1:8080/health
         get("/health") {
             call.respond(HealthResponse(status = "ok"))
         }
+
+        // Веб-интерфейс: отдаём статические файлы из resources/static.
+        // Запрос "/" вернёт static/index.html — простую страницу с формой и списком трат.
+        staticResources("/", "static")
     }
 }
 

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мои траты</title>
+    <style>
+        :root {
+            --bg: #f4f5f7;
+            --card: #ffffff;
+            --text: #1a1a1a;
+            --muted: #6b7280;
+            --accent: #2e7d32;
+            --border: #e3e5e8;
+            --danger: #c0392b;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16181c; --card: #22262c; --text: #e8eaed;
+                --muted: #9aa0a6; --border: #333840;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+            font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            display: flex; justify-content: center;
+        }
+        .wrap { width: 100%; max-width: 560px; }
+        h1 { font-size: 22px; margin: 8px 0 16px; }
+        .card {
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 16px; margin-bottom: 16px;
+        }
+        form { display: flex; flex-wrap: wrap; gap: 8px; }
+        input {
+            padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+            background: transparent; color: var(--text); font-size: 15px;
+        }
+        #category { flex: 1 1 160px; }
+        #amount { width: 110px; }
+        #note { flex: 1 1 100%; }
+        button {
+            padding: 10px 16px; border: none; border-radius: 8px; cursor: pointer;
+            background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
+        }
+        button:disabled { opacity: .6; cursor: default; }
+        #addBtn { flex: 1 1 100%; }
+        .total { font-size: 15px; color: var(--muted); margin: 4px 2px 12px; }
+        .total b { color: var(--text); font-size: 18px; }
+        .row {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 4px; border-bottom: 1px solid var(--border);
+        }
+        .row:last-child { border-bottom: none; }
+        .row .info { flex: 1; min-width: 0; }
+        .row .cat { font-size: 16px; }
+        .row .date { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .row .amt { font-size: 16px; font-weight: 600; white-space: nowrap; }
+        .del {
+            background: transparent; color: var(--danger); font-size: 18px;
+            padding: 4px 8px; font-weight: 400;
+        }
+        .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+        .error { color: var(--danger); margin: 8px 2px; min-height: 18px; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>💸 Мои траты</h1>
+
+    <div class="card">
+        <form id="addForm">
+            <input id="category" placeholder="Категория (напр. кофе)" required>
+            <input id="amount" placeholder="Сумма" inputmode="decimal" required>
+            <input id="note" placeholder="Заметка (необязательно)">
+            <button id="addBtn" type="submit">Добавить трату</button>
+        </form>
+        <div class="error" id="error"></div>
+    </div>
+
+    <div class="total" id="total"></div>
+
+    <div class="card" id="list">
+        <div class="empty">Загрузка…</div>
+    </div>
+</div>
+
+<script>
+    // Адрес API относительный — страница и API отдаются с одного адреса.
+    const API = '/api/expenses';
+    const errorEl = document.getElementById('error');
+    const listEl = document.getElementById('list');
+    const totalEl = document.getElementById('total');
+
+    // Убираем лишний ".0" у целых сумм: 200 -> "200", 149.5 -> "149.5".
+    function money(v) { return Number.isInteger(v) ? String(v) : String(v); }
+
+    // "2026-07-18T04:27:32.6" -> "18.07 04:27".
+    function fmtDate(iso) {
+        const d = new Date(iso);
+        if (isNaN(d)) return iso.slice(0, 16);
+        const p = (n) => String(n).padStart(2, '0');
+        return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    async function load() {
+        errorEl.textContent = '';
+        try {
+            const res = await fetch(API);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            data.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+            render(data);
+        } catch (e) {
+            listEl.innerHTML = '<div class="empty">Не удалось загрузить траты</div>';
+            errorEl.textContent = 'Ошибка сети: ' + e.message;
+        }
+    }
+
+    function render(data) {
+        const sum = data.reduce((s, e) => s + e.amount, 0);
+        totalEl.innerHTML = `Всего: <b>${money(sum)} ₽</b> · ${data.length} трат`;
+
+        if (data.length === 0) {
+            listEl.innerHTML = '<div class="empty">Пока трат нет. Добавь первую!</div>';
+            return;
+        }
+        listEl.innerHTML = data.map((e) => `
+            <div class="row">
+                <div class="info">
+                    <div class="cat">${escapeHtml(e.category)}</div>
+                    <div class="date">${fmtDate(e.createdAt)}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+                </div>
+                <div class="amt">${money(e.amount)} ₽</div>
+                <button class="del" title="Удалить" data-id="${e.id}">✕</button>
+            </div>
+        `).join('');
+
+        listEl.querySelectorAll('.del').forEach((btn) => {
+            btn.addEventListener('click', () => del(btn.dataset.id));
+        });
+    }
+
+    // Экранируем текст пользователя, чтобы он не сломал/не внедрил HTML.
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+
+    async function del(id) {
+        try {
+            const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status);
+            load();
+        } catch (e) {
+            errorEl.textContent = 'Не удалось удалить: ' + e.message;
+        }
+    }
+
+    document.getElementById('addForm').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        errorEl.textContent = '';
+        const category = document.getElementById('category').value.trim();
+        const amountRaw = document.getElementById('amount').value.replace(',', '.');
+        const noteRaw = document.getElementById('note').value.trim();
+        const amount = parseFloat(amountRaw);
+        if (!category || isNaN(amount) || amount <= 0) {
+            errorEl.textContent = 'Введите категорию и сумму больше нуля';
+            return;
+        }
+        const btn = document.getElementById('addBtn');
+        btn.disabled = true;
+        try {
+            const res = await fetch(API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount, category, note: noteRaw || null }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            document.getElementById('category').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('note').value = '';
+            load();
+        } catch (e) {
+            errorEl.textContent = 'Не удалось добавить: ' + e.message;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    load();
+</script>
+</body>
+</html>

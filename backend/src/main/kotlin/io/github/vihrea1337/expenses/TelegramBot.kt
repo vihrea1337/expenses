@@ -14,6 +14,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 import kotlin.concurrent.thread
 
@@ -113,21 +116,9 @@ private suspend fun botLoop(token: String) {
                 val message = update.message ?: continue // не обычное сообщение — пропускаем
                 val text = message.text ?: continue       // без текста (стикер/фото) — пропускаем
 
-                // Разбираем текст в трату. Если формат непонятен — parseExpense вернёт null.
-                val new = parseExpense(text)
-                if (new == null) {
-                    sendMessage(
-                        client, base, message.chat.id,
-                        "Не понял 🤔 Формат: категория и сумма, например: кофе 200",
-                    )
-                } else {
-                    // Пишем в ту же базу, что и REST API (через общий ExpenseRepository).
-                    val saved = ExpenseRepository.add(new)
-                    sendMessage(
-                        client, base, message.chat.id,
-                        "Записал: ${saved.category} — ${saved.amount} ₽",
-                    )
-                }
+                // Готовим ответ (команда или запись траты) и отправляем его.
+                val reply = handleText(text)
+                sendMessage(client, base, message.chat.id, reply)
             }
         } catch (e: Exception) {
             // Сеть моргнула или Telegram недоступен — не падаем, ждём и пробуем снова.
@@ -145,3 +136,75 @@ private suspend fun sendMessage(client: HttpClient, base: String, chatId: Long, 
         parameter("text", text)
     }
 }
+
+// Формат даты в ответах бота: "18.07 04:27".
+private val dateFmt = DateTimeFormatter.ofPattern("dd.MM HH:mm")
+
+/**
+ * Формирует ответ бота на сообщение пользователя:
+ *  - известная команда (/help, /list, /total или русское слово) — справка / список / сумма;
+ *  - иначе пытаемся разобрать текст как трату ("кофе 200") и записать её в базу.
+ */
+private fun handleText(text: String): String {
+    val trimmed = text.trim()
+    return when (trimmed.lowercase()) {
+        "/start", "/help", "помощь", "старт" -> helpText()
+        "/list", "список", "траты" -> listText()
+        "/total", "итого", "сумма", "сколько" -> totalText()
+        else -> {
+            val new = parseExpense(trimmed)
+            if (new == null) {
+                "Не понял 🤔 Напиши категорию и сумму, например: кофе 200\n(справка — /help)"
+            } else {
+                val saved = ExpenseRepository.add(new)
+                "✅ Записал: ${saved.category} — ${formatMoney(saved.amount)} ₽"
+            }
+        }
+    }
+}
+
+/** Текст справки (/help, /start). */
+private fun helpText(): String = """
+    Привет! Я записываю твои траты 💸
+
+    Просто напиши категорию и сумму, например:
+    кофе 200
+    такси до дома 350
+
+    Команды:
+    /list — последние траты
+    /total — сколько потрачено
+    /help — эта справка
+""".trimIndent()
+
+/** Список последних (до 10) трат. */
+private fun listText(): String {
+    val all = ExpenseRepository.all().sortedByDescending { it.createdAt }
+    if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
+    val shown = all.take(10)
+    val lines = shown.joinToString("\n") { e ->
+        "• ${e.category} — ${formatMoney(e.amount)} ₽ (${formatDate(e.createdAt)})"
+    }
+    val tail = if (all.size > shown.size) "\n… показаны ${shown.size} из ${all.size}" else ""
+    return "Последние траты:\n$lines$tail"
+}
+
+/** Сумма всех трат и отдельно за сегодня. */
+private fun totalText(): String {
+    val all = ExpenseRepository.all()
+    if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
+    val total = all.sumOf { it.amount }
+    val today = LocalDate.now()
+    val todayTotal = all
+        .filter { runCatching { LocalDate.parse(it.createdAt.take(10)) == today }.getOrDefault(false) }
+        .sumOf { it.amount }
+    return "Всего: ${formatMoney(total)} ₽ за ${all.size} трат.\nСегодня: ${formatMoney(todayTotal)} ₽"
+}
+
+/** 200.0 -> "200", 149.5 -> "149.5" (убираем лишний ".0"). */
+private fun formatMoney(v: Double): String =
+    if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
+
+/** ISO-строка времени -> "18.07 04:27". */
+private fun formatDate(iso: String): String =
+    runCatching { LocalDateTime.parse(iso).format(dateFmt) }.getOrDefault(iso.take(16))
