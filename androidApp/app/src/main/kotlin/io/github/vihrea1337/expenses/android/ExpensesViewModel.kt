@@ -80,4 +80,18 @@ class ExpensesViewModel : ViewModel() {
             }
         }
     }
+
+    /** Удалить трату по id и обновить список. */
+    fun deleteExpense(id: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            try {
+                val response = ApiClient.api.deleteExpense(id)
+                if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code()}")
+                refresh()
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
+            }
+        }
+    }
 }

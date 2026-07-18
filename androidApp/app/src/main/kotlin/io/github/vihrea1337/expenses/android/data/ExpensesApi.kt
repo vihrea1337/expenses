@@ -2,11 +2,14 @@ package io.github.vihrea1337.expenses.android.data
 
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 
 /**
  * Описание "ручек" нашего REST API. Retrofit по этому интерфейсу сам сгенерирует
@@ -20,6 +23,13 @@ interface ExpensesApi {
     /** POST /api/expenses — добавить трату; в тело кладём NewExpense, сервер вернёт готовую Expense. */
     @POST("api/expenses")
     suspend fun addExpense(@Body body: NewExpense): Expense
+
+    /**
+     * DELETE /api/expenses/{id} — удалить трату по id.
+     * Response<Unit> — нам важен только статус ответа (204 = удалено), тело сервер не шлёт.
+     */
+    @DELETE("api/expenses/{id}")
+    suspend fun deleteExpense(@Path("id") id: String): Response<Unit>
 }
 
 /**
