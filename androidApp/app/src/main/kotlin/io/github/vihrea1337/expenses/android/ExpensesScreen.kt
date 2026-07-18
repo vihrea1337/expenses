@@ -91,20 +91,20 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(if (selectedTab == 0) "Мои траты" else "Аналитика") }) },
+        topBar = { TopAppBar(title = { Text(if (selectedTab == 0) "Аналитика" else "Мои траты") }) },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Text("📋") },
-                    label = { Text("Траты") },
+                    icon = { Text("📊") },
+                    label = { Text("Аналитика") },
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Text("📊") },
-                    label = { Text("Аналитика") },
+                    icon = { Text("📋") },
+                    label = { Text("Траты") },
                 )
             }
         },
@@ -137,20 +137,20 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
             }
 
             when (selectedTab) {
-                0 -> ListTab(
+                0 -> AnalyticsTab(
+                    breakdown = breakdown,
+                    total = total,
+                    budget = state.monthlyBudget,
+                    monthSpent = monthSpent,
+                    onEditBudget = { showBudgetDialog = true },
+                )
+                else -> ListTab(
                     expenses = filtered,
                     total = total,
                     isLoading = state.isLoading,
                     onRefresh = { viewModel.refresh() },
                     onEdit = { editing = it },
                     onDelete = { viewModel.deleteExpense(it) },
-                )
-                else -> AnalyticsTab(
-                    breakdown = breakdown,
-                    total = total,
-                    budget = state.monthlyBudget,
-                    monthSpent = monthSpent,
-                    onEditBudget = { showBudgetDialog = true },
                 )
             }
         }
