@@ -444,6 +444,8 @@ private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Uni
             "${formatAmount(expense.amount)} ₽",
             style = MaterialTheme.typography.titleMedium,
         )
+        // Видимая подсказка, что трату можно редактировать (то же делает тап по строке).
+        TextButton(onClick = onEdit) { Text("✎") }
         TextButton(onClick = onDelete) { Text("✕") }
     }
     HorizontalDivider()

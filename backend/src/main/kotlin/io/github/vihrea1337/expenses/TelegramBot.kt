@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.time.LocalDate
@@ -34,6 +35,8 @@ data class TgUpdate(
     // @SerialName связывает имя из JSON с нашим именем поля.
     @SerialName("update_id") val updateId: Long,
     val message: TgMessage? = null,
+    // Нажатие на inline-кнопку прилетает отдельным типом апдейта.
+    @SerialName("callback_query") val callbackQuery: TgCallbackQuery? = null,
 )
 
 @Serializable
@@ -41,6 +44,24 @@ data class TgMessage(val chat: TgChat, val text: String? = null)
 
 @Serializable
 data class TgChat(val id: Long)
+
+/** Нажатие на inline-кнопку: id (для ответа), message (в каком чате), data (что за кнопка). */
+@Serializable
+data class TgCallbackQuery(
+    val id: String,
+    val message: TgMessage? = null,
+    val data: String? = null,
+)
+
+/*
+ * Модели inline-клавиатуры — их мы ОТПРАВЛЯЕМ Telegram (в поле reply_markup).
+ * text — надпись на кнопке, callback_data — что прилетит нам при нажатии.
+ */
+@Serializable
+data class InlineKeyboardButton(val text: String, @SerialName("callback_data") val callbackData: String)
+
+@Serializable
+data class InlineKeyboardMarkup(@SerialName("inline_keyboard") val inlineKeyboard: List<List<InlineKeyboardButton>>)
 
 /** Прочитать токен из secrets.properties (ключ bot.token). Нет файла/ключа — вернёт null. */
 private fun readTokenFromFile(): String? {
@@ -113,12 +134,25 @@ private suspend fun botLoop(token: String) {
                 // Сдвигаем offset, чтобы это сообщение больше не пришло повторно.
                 offset = update.updateId + 1
 
-                val message = update.message ?: continue // не обычное сообщение — пропускаем
-                val text = message.text ?: continue       // без текста (стикер/фото) — пропускаем
+                // 1) Нажатие на inline-кнопку.
+                val callback = update.callbackQuery
+                if (callback != null) {
+                    answerCallback(client, base, callback.id) // убрать "часики" на кнопке
+                    val chatId = callback.message?.chat?.id ?: continue
+                    sendMessage(client, base, chatId, handleCallback(callback.data))
+                    continue
+                }
 
-                // Готовим ответ (команда или запись траты) и отправляем его.
-                val reply = handleText(text)
-                sendMessage(client, base, message.chat.id, reply)
+                // 2) Обычное текстовое сообщение.
+                val message = update.message ?: continue // не сообщение — пропускаем
+                val text = message.text ?: continue       // без текста (стикер/фото) — пропускаем
+                val lower = text.trim().lowercase()
+                if (lower == "/start" || lower == "/menu" || lower == "меню") {
+                    // Показываем меню с кнопками.
+                    sendMenu(client, base, message.chat.id, "Что показать?", mainMenu())
+                } else {
+                    sendMessage(client, base, message.chat.id, handleText(text))
+                }
             }
         } catch (e: Exception) {
             // Сеть моргнула или Telegram недоступен — не падаем, ждём и пробуем снова.
@@ -134,6 +168,54 @@ private suspend fun sendMessage(client: HttpClient, base: String, chatId: Long, 
     client.get("$base/sendMessage") {
         parameter("chat_id", chatId)
         parameter("text", text)
+    }
+}
+
+// Для кодирования клавиатуры (reply_markup) в JSON-строку.
+private val botJson = Json { ignoreUnknownKeys = true }
+
+/** Главное меню бота — кнопки под сообщением. callbackData прилетит нам при нажатии на кнопку. */
+private fun mainMenu() = InlineKeyboardMarkup(
+    listOf(
+        listOf(
+            InlineKeyboardButton("📋 Список", "list"),
+            InlineKeyboardButton("💰 Итого", "total"),
+        ),
+        listOf(
+            InlineKeyboardButton("📊 Категории", "stats"),
+            InlineKeyboardButton("🎯 Бюджет", "budget"),
+        ),
+    ),
+)
+
+/** Что показать при нажатии кнопки (по её callback_data) — те же функции, что и у команд. */
+private fun handleCallback(data: String?): String = when (data) {
+    "list" -> listText()
+    "total" -> totalText()
+    "stats" -> statsText()
+    "budget" -> budgetStatusText()
+    else -> "Неизвестная кнопка."
+}
+
+/** Отправить сообщение с inline-клавиатурой (reply_markup передаётся JSON-строкой). */
+private suspend fun sendMenu(
+    client: HttpClient,
+    base: String,
+    chatId: Long,
+    text: String,
+    markup: InlineKeyboardMarkup,
+) {
+    client.get("$base/sendMessage") {
+        parameter("chat_id", chatId)
+        parameter("text", text)
+        parameter("reply_markup", botJson.encodeToString(markup))
+    }
+}
+
+/** Ответить на нажатие кнопки, чтобы Telegram убрал "часики" загрузки на ней. */
+private suspend fun answerCallback(client: HttpClient, base: String, callbackId: String) {
+    client.get("$base/answerCallbackQuery") {
+        parameter("callback_query_id", callbackId)
     }
 }
 
@@ -189,6 +271,7 @@ private fun helpText(): String = """
     такси до дома 350
 
     Команды:
+    /menu — кнопки (список, итого, категории, бюджет)
     /list — последние траты
     /total — сколько потрачено
     /stats — траты по категориям
