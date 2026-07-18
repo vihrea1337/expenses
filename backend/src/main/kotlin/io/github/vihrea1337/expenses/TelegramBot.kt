@@ -19,6 +19,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Properties
+import java.util.UUID
 import kotlin.concurrent.thread
 
 /*
@@ -43,7 +44,7 @@ data class TgUpdate(
 data class TgMessage(val chat: TgChat, val text: String? = null)
 
 @Serializable
-data class TgChat(val id: Long)
+data class TgChat(val id: Long, @SerialName("first_name") val firstName: String? = null)
 
 /** Нажатие на inline-кнопку: id (для ответа), message (в каком чате), data (что за кнопка). */
 @Serializable
@@ -138,20 +139,23 @@ private suspend fun botLoop(token: String) {
                 val callback = update.callbackQuery
                 if (callback != null) {
                     answerCallback(client, base, callback.id) // убрать "часики" на кнопке
-                    val chatId = callback.message?.chat?.id ?: continue
-                    sendMessage(client, base, chatId, handleCallback(callback.data))
+                    val chat = callback.message?.chat ?: continue
+                    val user = UserRepository.findOrCreateByTelegram(chat.id, chat.firstName ?: "Пользователь")
+                    sendMessage(client, base, chat.id, handleCallback(user.id, callback.data))
                     continue
                 }
 
                 // 2) Обычное текстовое сообщение.
                 val message = update.message ?: continue // не сообщение — пропускаем
                 val text = message.text ?: continue       // без текста (стикер/фото) — пропускаем
+                // Бот сам заводит аккаунт этому Telegram-пользователю (или находит существующий).
+                val user = UserRepository.findOrCreateByTelegram(message.chat.id, message.chat.firstName ?: "Пользователь")
                 val lower = text.trim().lowercase()
                 if (lower == "/start" || lower == "/menu" || lower == "меню") {
                     // Показываем меню с кнопками.
                     sendMenu(client, base, message.chat.id, "Что показать?", mainMenu())
                 } else {
-                    sendMessage(client, base, message.chat.id, handleText(text))
+                    sendMessage(client, base, message.chat.id, handleText(user, text))
                 }
             }
         } catch (e: Exception) {
@@ -189,11 +193,11 @@ private fun mainMenu() = InlineKeyboardMarkup(
 )
 
 /** Что показать при нажатии кнопки (по её callback_data) — те же функции, что и у команд. */
-private fun handleCallback(data: String?): String = when (data) {
-    "list" -> listText()
-    "total" -> totalText()
-    "stats" -> statsText()
-    "budget" -> budgetStatusText()
+private fun handleCallback(userId: UUID, data: String?): String = when (data) {
+    "list" -> listText(userId)
+    "total" -> totalText(userId)
+    "stats" -> statsText(userId)
+    "budget" -> budgetStatusText(userId)
     else -> "Неизвестная кнопка."
 }
 
@@ -227,16 +231,23 @@ private val dateFmt = DateTimeFormatter.ofPattern("dd.MM HH:mm")
  *  - известная команда (/help, /list, /total или русское слово) — справка / список / сумма;
  *  - иначе пытаемся разобрать текст как трату ("кофе 200") и записать её в базу.
  */
-private fun handleText(text: String): String {
+private fun handleText(user: User, text: String): String {
+    val userId = user.id
     val trimmed = text.trim()
     val lower = trimmed.lowercase()
 
+    // Токен доступа — чтобы пользоваться этим же аккаунтом в приложении и на сайте.
+    if (lower == "/token") {
+        return "Твой токен доступа:\n${user.token}\n\n" +
+            "Вставь его в приложении или на сайте — и увидишь там эти же траты."
+    }
+
     // Бюджет: "/budget" или "бюджет" — показать статус; "бюджет 30000" — задать лимит.
-    if (lower == "/budget" || lower == "бюджет") return budgetStatusText()
+    if (lower == "/budget" || lower == "бюджет") return budgetStatusText(userId)
     if (lower.startsWith("бюджет ") || lower.startsWith("/budget ")) {
         val value = trimmed.substringAfter(' ').trim().replace(',', '.').toDoubleOrNull()
         return if (value != null && value > 0) {
-            ExpenseRepository.setBudget(value)
+            UserRepository.setBudget(userId, value)
             "✅ Бюджет на месяц: ${formatMoney(value)} ₽"
         } else {
             "Не понял сумму бюджета. Пример: бюджет 30000"
@@ -245,15 +256,15 @@ private fun handleText(text: String): String {
 
     return when (lower) {
         "/start", "/help", "помощь", "старт" -> helpText()
-        "/list", "список", "траты" -> listText()
-        "/total", "итого", "сумма", "сколько" -> totalText()
-        "/stats", "статистика", "категории" -> statsText()
+        "/list", "список", "траты" -> listText(userId)
+        "/total", "итого", "сумма", "сколько" -> totalText(userId)
+        "/stats", "статистика", "категории" -> statsText(userId)
         else -> {
             val new = parseExpense(trimmed)
             if (new == null) {
                 "Не понял 🤔 Напиши категорию и сумму, например: кофе 200\n(справка — /help)"
             } else {
-                val saved = ExpenseRepository.add(new)
+                val saved = ExpenseRepository.add(userId, new)
                 // Обобщённую категорию проставит ИИ в фоне.
                 Classifier.scheduleClassification(saved.id, saved.category)
                 "✅ Записал: ${saved.category} — ${formatMoney(saved.amount)} ₽"
@@ -276,12 +287,13 @@ private fun helpText(): String = """
     /total — сколько потрачено
     /stats — траты по категориям
     /budget — бюджет на месяц (задать: бюджет 30000)
+    /token — токен для входа в приложение/на сайт
     /help — эта справка
 """.trimIndent()
 
 /** Список последних (до 10) трат. */
-private fun listText(): String {
-    val all = ExpenseRepository.all().sortedByDescending { it.createdAt }
+private fun listText(userId: UUID): String {
+    val all = ExpenseRepository.all(userId).sortedByDescending { it.createdAt }
     if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
     val shown = all.take(10)
     val lines = shown.joinToString("\n") { e ->
@@ -292,8 +304,8 @@ private fun listText(): String {
 }
 
 /** Сумма всех трат и отдельно за сегодня. */
-private fun totalText(): String {
-    val all = ExpenseRepository.all()
+private fun totalText(userId: UUID): String {
+    val all = ExpenseRepository.all(userId)
     if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
     val total = all.sumOf { it.amount }
     val today = LocalDate.now()
@@ -304,8 +316,8 @@ private fun totalText(): String {
 }
 
 /** Разбивка трат по обобщённым категориям (от ИИ) с суммой и долей в процентах. */
-private fun statsText(): String {
-    val all = ExpenseRepository.all()
+private fun statsText(userId: UUID): String {
+    val all = ExpenseRepository.all(userId)
     if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
     val total = all.sumOf { it.amount }
     val byGroup = all
@@ -321,10 +333,10 @@ private fun statsText(): String {
 }
 
 /** Статус месячного бюджета: лимит, потрачено в этом месяце, остаток/перерасход. */
-private fun budgetStatusText(): String {
-    val budget = ExpenseRepository.getBudget()
+private fun budgetStatusText(userId: UUID): String {
+    val budget = UserRepository.getBudget(userId)
         ?: return "Бюджет на месяц не задан. Задай так: бюджет 30000"
-    val spent = currentMonthSpent()
+    val spent = currentMonthSpent(userId)
     val left = budget - spent
     val tail = if (left >= 0) {
         "Осталось: ${formatMoney(left)} ₽"
@@ -336,9 +348,9 @@ private fun budgetStatusText(): String {
 }
 
 /** Сумма трат за текущий календарный месяц (с 1-го числа). */
-private fun currentMonthSpent(): Double {
+private fun currentMonthSpent(userId: UUID): Double {
     val now = LocalDate.now()
-    return ExpenseRepository.all()
+    return ExpenseRepository.all(userId)
         .filter {
             runCatching {
                 val d = LocalDate.parse(it.createdAt.take(10))

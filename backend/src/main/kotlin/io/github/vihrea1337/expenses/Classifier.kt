@@ -109,9 +109,9 @@ object Classifier {
      * Переклассифицировать все траты без категории (запускается в фоне).
      * Возвращает, сколько трат взято в обработку. Между запросами — пауза (щадим лимиты Groq).
      */
-    fun reclassifyPending(): Int {
+    fun reclassifyPending(userId: UUID): Int {
         if (!enabled) return 0
-        val pending = ExpenseRepository.expensesWithoutGroup()
+        val pending = ExpenseRepository.expensesWithoutGroup(userId)
         scope.launch {
             for ((id, text) in pending) {
                 val group = classify(text) ?: continue

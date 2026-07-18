@@ -5,11 +5,13 @@ import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.bearer
+import io.ktor.server.auth.principal
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.netty.Netty
@@ -29,67 +31,55 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.UUID
 
 /**
- * Точка входа. Поднимает HTTP-сервер на движке Netty.
- *
- * host = "127.0.0.1" — сервер слушает ТОЛЬКО локальные подключения. На боевом сервере
- * снаружи до него будет дотягиваться только nginx (он стоит спереди и раздаёт HTTPS).
- * Наружу в интернет порт 8080 не торчит — так безопаснее.
+ * Точка входа. host = "127.0.0.1" — сервер слушает только локально, снаружи до него
+ * дотягивается лишь nginx (он раздаёт HTTPS). В интернет порт 8080 не торчит.
  */
 fun main() {
-    // 1. Первым делом подключаемся к базе. Её используют И HTTP-эндпоинты, И Telegram-бот,
-    //    поэтому подключение должно быть готово ДО того, как хоть кто-то начнёт писать в базу.
-    configureDatabase()
-
-    // 2. Запускаем Telegram-бота (моторчик) в фоне. Если токена нет — просто не стартует,
-    //    а сервер поднимается как обычно. К этому моменту база уже подключена — бот может писать.
-    startBot()
-
-    // 3. Поднимаем HTTP-сервер и ждём (wait = true — main не завершается, сервер работает).
+    configureDatabase() // подключиться к базе, создать таблицы, мигрировать старые данные
+    startBot()          // Telegram-бот в фоне (если есть токен)
     embeddedServer(Netty, port = 8080, host = "127.0.0.1") {
         module()
     }.start(wait = true)
 }
 
-/**
- * Настройка приложения: подключаем плагины и описываем маршруты (адреса-"ручки").
- * Вынесено в отдельную функцию, чтобы позже переиспользовать её в тестах.
- */
-fun Application.module() {
-    // Плагин, который умеет превращать наши классы в JSON при ответе (и обратно при приёме).
-    install(ContentNegotiation) {
-        json()
-    }
+/** id текущего (авторизованного) пользователя — из "личности", которую положила проверка токена. */
+private fun ApplicationCall.userId(): UUID =
+    UUID.fromString(principal<UserIdPrincipal>()!!.name)
 
-    // Токен для защиты API берём из переменной окружения API_TOKEN.
-    // Если он задан — все ручки /api/* требуют заголовок "Authorization: Bearer <token>".
-    // Если не задан (например, локальная разработка) — API открыт, но предупреждаем в лог.
-    val apiToken = System.getenv("API_TOKEN")?.trim().orEmpty()
-    val authEnabled = apiToken.isNotEmpty()
-    if (authEnabled) {
-        install(Authentication) {
-            // "api-auth" — имя нашей схемы проверки; bearer = токен в заголовке Authorization.
-            bearer("api-auth") {
-                authenticate { credential ->
-                    // Пришедший токен совпал с нашим? Пускаем (возвращаем "личность").
-                    // Иначе null → Ktor сам ответит 401 Unauthorized.
-                    if (credential.token == apiToken) UserIdPrincipal("api") else null
-                }
+fun Application.module() {
+    // Плагин: превращает наши классы в JSON и обратно.
+    install(ContentNegotiation) { json() }
+
+    // Авторизация по токену: находим пользователя, чей токен пришёл в заголовке
+    // "Authorization: Bearer <token>". Нашли — пускаем как этого пользователя; нет — 401.
+    install(Authentication) {
+        bearer("api-auth") {
+            authenticate { credential ->
+                val user = UserRepository.findByToken(credential.token)
+                if (user != null) UserIdPrincipal(user.id.toString()) else null
             }
         }
-    } else {
-        println("ВНИМАНИЕ: API_TOKEN не задан — REST API работает БЕЗ авторизации (ок для локали).")
     }
 
     routing {
-        // Ручки /api/* — под проверкой токена, если он задан; иначе открыто.
-        if (authEnabled) {
-            authenticate("api-auth") { apiRoutes() }
-        } else {
-            apiRoutes()
+        // Регистрация — БЕЗ токена (иначе новый пользователь не смог бы завести аккаунт).
+        post("/api/register") {
+            val body = call.receive<RegisterRequest>()
+            val user = UserRepository.create(body.name)
+            call.respond(UserResponse(token = user.token, name = user.displayName))
         }
 
-        // /health и веб-страница остаются открытыми: health — для мониторинга;
-        // "/" — это только HTML-каркас, а данные за ним всё равно защищены токеном.
+        // Всё остальное /api/* — только с валидным токеном, и в контексте своего пользователя.
+        authenticate("api-auth") {
+            apiRoutes()
+            get("/api/me") {
+                val user = UserRepository.findById(call.userId())
+                if (user == null) call.respond(HttpStatusCode.Unauthorized)
+                else call.respond(MeResponse(name = user.displayName))
+            }
+        }
+
+        // Открытые: health для мониторинга и веб-страница (данные за ней всё равно под токеном).
         get("/health") {
             call.respond(HealthResponse(status = "ok"))
         }
@@ -97,144 +87,100 @@ fun Application.module() {
     }
 }
 
-/**
- * REST-ручки для работы с тратами. Вынесены в отдельную функцию, чтобы подключать их
- * и внутри authenticate { } (с проверкой токена), и без неё (локальная разработка).
- */
+/** REST-ручки трат/бюджета. Каждая работает в контексте текущего пользователя (call.userId()). */
 private fun Route.apiRoutes() {
-    // Список всех трат. Вся работа с базой — внутри ExpenseRepository.
     get("/api/expenses") {
-        call.respond(ExpenseRepository.all())
+        call.respond(ExpenseRepository.all(call.userId()))
     }
 
-    // Добавить трату. Тело запроса (JSON) превращается в NewExpense,
-    // репозиторий кладёт его в базу и возвращает уже полноценную запись с id и временем.
     post("/api/expenses") {
+        val userId = call.userId()
         val body = call.receive<NewExpense>()
-        val saved = ExpenseRepository.add(body)
-        // Обобщённую категорию проставит ИИ в фоне — ответ не задерживаем.
+        val saved = ExpenseRepository.add(userId, body)
         Classifier.scheduleClassification(saved.id, saved.category)
         call.respond(saved)
     }
 
-    // Удалить трату по id: DELETE /api/expenses/<id>.
-    // {id} в пути — переменная, её значение достаём через call.parameters["id"].
     delete("/api/expenses/{id}") {
-        val idParam = call.parameters["id"]
-        // id должен быть корректным UUID; если нет — 400 (неверный запрос).
-        val uuid = runCatching { UUID.fromString(idParam) }.getOrNull()
+        val userId = call.userId()
+        val uuid = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
         if (uuid == null) {
             call.respond(HttpStatusCode.BadRequest, "Некорректный id")
             return@delete
         }
-        val removed = ExpenseRepository.delete(uuid)
-        // 204 No Content — удалили; 404 — траты с таким id не было.
+        val removed = ExpenseRepository.delete(userId, uuid)
         call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
     }
 
-    // Отредактировать трату по id: PUT /api/expenses/<id>.
     put("/api/expenses/{id}") {
+        val userId = call.userId()
         val uuid = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
         if (uuid == null) {
             call.respond(HttpStatusCode.BadRequest, "Некорректный id")
             return@put
         }
         val body = call.receive<UpdateExpense>()
-        val updated = ExpenseRepository.updateExpense(uuid, body.amount, body.category, body.note, body.categoryGroup)
+        val updated = ExpenseRepository.updateExpense(userId, uuid, body.amount, body.category, body.note, body.categoryGroup)
         if (updated == null) {
             call.respond(HttpStatusCode.NotFound)
             return@put
         }
-        // Если категорию ИИ не задали вручную (null) — переопределяем её заново через ИИ.
         if (body.categoryGroup == null) {
             Classifier.scheduleClassification(updated.id, updated.category)
         }
         call.respond(updated)
     }
 
-    // Прочитать месячный бюджет. monthlyBudget = null, если не задан.
     get("/api/budget") {
-        call.respond(BudgetDto(ExpenseRepository.getBudget()))
+        call.respond(BudgetDto(UserRepository.getBudget(call.userId())))
     }
 
-    // Задать (или сбросить) месячный бюджет. В теле — { "monthlyBudget": 30000 } или null.
     put("/api/budget") {
+        val userId = call.userId()
         val body = call.receive<BudgetDto>()
-        ExpenseRepository.setBudget(body.monthlyBudget)
-        call.respond(BudgetDto(ExpenseRepository.getBudget()))
+        UserRepository.setBudget(userId, body.monthlyBudget)
+        call.respond(BudgetDto(UserRepository.getBudget(userId)))
     }
 
-    // Переклассифицировать в фоне все траты без категории (например, добавленные до включения ИИ).
     post("/api/reclassify") {
-        call.respond(ReclassifyResult(Classifier.reclassifyPending()))
+        call.respond(ReclassifyResult(Classifier.reclassifyPending(call.userId())))
     }
 }
 
 /**
- * Подключение к базе данных PostgreSQL и создание таблиц.
- *
- * Вызывается один раз при старте (из main). От Ktor не зависит — это обычная функция,
- * поэтому её легко переиспользовать (например, в тестах или отдельном скрипте).
+ * Подключение к базе PostgreSQL, создание таблиц и миграция старых данных под аккаунты.
  */
 fun configureDatabase() {
-    // 1. Настройки подключения. HikariConfig — это "анкета" для пула соединений:
-    //    куда подключаться, под кем, с каким паролем.
     val config = HikariConfig().apply {
-        // Адрес базы, логин и пароль берём из переменных окружения, а если их нет —
-        // используем локальные dev-значения. Зачем так: ОДИН и тот же jar работает
-        // и на моём ПК (localhost/postgres/dev), и на боевом сервере (там переменные
-        // DB_URL/DB_USER/DB_PASSWORD задаёт systemd) — пароль в код не зашит.
-        // System.getenv("ИМЯ") ?: "значение_по_умолчанию" — "взять переменную, а если её нет — вот это".
-        //
-        // jdbcUrl — адрес базы. Формат: jdbc:postgresql://<хост>:<порт>/<имя_базы>.
         jdbcUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/expenses"
-        // Явно указываем драйвер PostgreSQL (класс, который умеет говорить именно с Postgres).
         driverClassName = "org.postgresql.Driver"
         username = System.getenv("DB_USER") ?: "postgres"
         password = System.getenv("DB_PASSWORD") ?: "dev"
-        // Сколько максимум одновременных соединений держать в пуле. 5 для разработки хватает.
         maximumPoolSize = 5
     }
-
-    // 2. По этой анкете HikariCP создаёт сам пул — набор готовых к работе соединений.
     val dataSource = HikariDataSource(config)
-
-    // 3. Отдаём пул в Exposed. Теперь все запросы Exposed будут ходить в нашу базу через него.
     Database.connect(dataSource)
 
-    // 4. Создаём таблицы. SchemaUtils.create читает "чертёж" Expenses (из Expenses.kt)
-    //    и выполняет CREATE TABLE IF NOT EXISTS — то есть создаёт таблицу, только если её ещё нет
-    //    (повторный запуск сервера ничего не сломает). transaction { } — обязательная обёртка:
-    //    любые обращения к базе в Exposed выполняются внутри транзакции.
     transaction {
-        SchemaUtils.create(Expenses, Settings)
-        // SchemaUtils.create не меняет уже существующие таблицы, поэтому новый столбец
-        // для ИИ-категории добавляем вручную (ADD COLUMN IF NOT EXISTS — безопасно повторно).
+        SchemaUtils.create(Expenses, Settings, Users)
+        // Новые столбцы для существующей таблицы expenses (create их не добавляет).
         exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_group VARCHAR(50)")
+        exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id UUID")
     }
+    // Бутстрап "владельца" по API_TOKEN и привязка к нему старых трат/бюджета.
+    UserRepository.bootstrapOwnerAndMigrate(System.getenv("API_TOKEN")?.trim())
 }
 
-/**
- * Ответ health-проверки. @Serializable — разрешение для kotlinx.serialization
- * автоматически превратить этот класс в JSON вида {"status":"ok"}.
- */
 @Serializable
 data class HealthResponse(val status: String)
 
-/**
- * Месячный бюджет для обмена по JSON. monthlyBudget = null означает "бюджет не задан".
- */
 @Serializable
 data class BudgetDto(val monthlyBudget: Double? = null)
 
-/** Результат переклассификации: сколько трат без категории взято в фоновую обработку. */
 @Serializable
 data class ReclassifyResult(val pending: Int)
 
-/**
- * Данные для редактирования траты (тело PUT /api/expenses/{id}).
- * categoryGroup = null — переопределить категорию через ИИ; непустое значение — ручная правка.
- */
+/** Тело PUT /api/expenses/{id}: categoryGroup = null → переопределить ИИ, иначе ручная категория. */
 @Serializable
 data class UpdateExpense(
     val amount: Double,
@@ -242,3 +188,15 @@ data class UpdateExpense(
     val note: String? = null,
     val categoryGroup: String? = null,
 )
+
+/** Тело регистрации: имя пользователя. */
+@Serializable
+data class RegisterRequest(val name: String = "")
+
+/** Ответ регистрации: токен доступа и имя. */
+@Serializable
+data class UserResponse(val token: String, val name: String)
+
+/** Ответ /api/me: кто я. */
+@Serializable
+data class MeResponse(val name: String)

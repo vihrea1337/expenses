@@ -11,5 +11,7 @@ object Expenses : Table("expenses") {
     // Обобщённая категория ("еда", "транспорт", ...), которую проставляет ИИ в фоне.
     // nullable: сразу после создания пусто, заполняется чуть позже (или остаётся пустым, если ИИ недоступен).
     val categoryGroup = varchar("category_group", 50).nullable()
+    // Чья это трата. nullable ради миграции старой таблицы; у новых трат всегда заполнено.
+    val userId = uuid("user_id").nullable()
     override val primaryKey = PrimaryKey(id)
 }
