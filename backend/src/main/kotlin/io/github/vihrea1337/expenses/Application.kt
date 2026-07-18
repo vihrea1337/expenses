@@ -81,15 +81,18 @@ fun configureDatabase() {
     // 1. Настройки подключения. HikariConfig — это "анкета" для пула соединений:
     //    куда подключаться, под кем, с каким паролем.
     val config = HikariConfig().apply {
+        // Адрес базы, логин и пароль берём из переменных окружения, а если их нет —
+        // используем локальные dev-значения. Зачем так: ОДИН и тот же jar работает
+        // и на моём ПК (localhost/postgres/dev), и на боевом сервере (там переменные
+        // DB_URL/DB_USER/DB_PASSWORD задаёт systemd) — пароль в код не зашит.
+        // System.getenv("ИМЯ") ?: "значение_по_умолчанию" — "взять переменную, а если её нет — вот это".
+        //
         // jdbcUrl — адрес базы. Формат: jdbc:postgresql://<хост>:<порт>/<имя_базы>.
-        // localhost:5432 — наш Docker-контейнер expenses-pg; expenses — имя базы внутри него.
-        jdbcUrl = "jdbc:postgresql://localhost:5432/expenses"
+        jdbcUrl = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/expenses"
         // Явно указываем драйвер PostgreSQL (класс, который умеет говорить именно с Postgres).
         driverClassName = "org.postgresql.Driver"
-        // Логин и пароль. Пока это локальные dev-значения (postgres / dev).
-        // Позже, на боевом сервере, вынесем их в переменные окружения, а не в код.
-        username = "postgres"
-        password = "dev"
+        username = System.getenv("DB_USER") ?: "postgres"
+        password = System.getenv("DB_PASSWORD") ?: "dev"
         // Сколько максимум одновременных соединений держать в пуле. 5 для разработки хватает.
         maximumPoolSize = 5
     }

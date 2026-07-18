@@ -39,22 +39,31 @@ data class TgMessage(val chat: TgChat, val text: String? = null)
 @Serializable
 data class TgChat(val id: Long)
 
-/**
- * Запуск бота. Читает токен из secrets.properties (файл в .gitignore — в git не попадёт).
- * Если файла или токена нет — бот не запускается, но сам сервер продолжает работать.
- */
-fun startBot() {
+/** Прочитать токен из secrets.properties (ключ bot.token). Нет файла/ключа — вернёт null. */
+private fun readTokenFromFile(): String? {
     val file = File("secrets.properties")
-    if (!file.exists()) {
-        println("Бот НЕ запущен: нет файла secrets.properties (создай его и впиши bot.token=...)")
-        return
-    }
-    val token = Properties()
+    if (!file.exists()) return null
+    return Properties()
         .apply { file.inputStream().use { load(it) } }
         .getProperty("bot.token")
         ?.trim()
+        ?.ifEmpty { null }
+}
+
+/**
+ * Запуск бота. Токен — из переменной окружения BOT_TOKEN или из secrets.properties
+ * (файл в .gitignore — в git не попадёт). Если токена нигде нет — бот не запускается,
+ * но сам сервер продолжает работать.
+ */
+fun startBot() {
+    // Токен ищем в двух местах по порядку:
+    //   1) переменная окружения BOT_TOKEN — так задаём токен на боевом сервере (в systemd);
+    //   2) файл secrets.properties (ключ bot.token) — удобно локально при разработке.
+    // Если нигде нет — бот просто не запускается, а сам сервер работает как обычно.
+    val token = System.getenv("BOT_TOKEN")?.trim()?.ifEmpty { null }
+        ?: readTokenFromFile()
     if (token.isNullOrEmpty()) {
-        println("Бот НЕ запущен: в secrets.properties пустой ключ bot.token")
+        println("Бот НЕ запущен: нет токена (ни BOT_TOKEN, ни bot.token в secrets.properties)")
         return
     }
 
