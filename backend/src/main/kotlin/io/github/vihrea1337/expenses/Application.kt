@@ -132,6 +132,26 @@ private fun Route.apiRoutes() {
         call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
     }
 
+    // Отредактировать трату по id: PUT /api/expenses/<id>.
+    put("/api/expenses/{id}") {
+        val uuid = runCatching { UUID.fromString(call.parameters["id"]) }.getOrNull()
+        if (uuid == null) {
+            call.respond(HttpStatusCode.BadRequest, "Некорректный id")
+            return@put
+        }
+        val body = call.receive<UpdateExpense>()
+        val updated = ExpenseRepository.updateExpense(uuid, body.amount, body.category, body.note, body.categoryGroup)
+        if (updated == null) {
+            call.respond(HttpStatusCode.NotFound)
+            return@put
+        }
+        // Если категорию ИИ не задали вручную (null) — переопределяем её заново через ИИ.
+        if (body.categoryGroup == null) {
+            Classifier.scheduleClassification(updated.id, updated.category)
+        }
+        call.respond(updated)
+    }
+
     // Прочитать месячный бюджет. monthlyBudget = null, если не задан.
     get("/api/budget") {
         call.respond(BudgetDto(ExpenseRepository.getBudget()))
@@ -210,3 +230,15 @@ data class BudgetDto(val monthlyBudget: Double? = null)
 /** Результат переклассификации: сколько трат без категории взято в фоновую обработку. */
 @Serializable
 data class ReclassifyResult(val pending: Int)
+
+/**
+ * Данные для редактирования траты (тело PUT /api/expenses/{id}).
+ * categoryGroup = null — переопределить категорию через ИИ; непустое значение — ручная правка.
+ */
+@Serializable
+data class UpdateExpense(
+    val amount: Double,
+    val category: String,
+    val note: String? = null,
+    val categoryGroup: String? = null,
+)

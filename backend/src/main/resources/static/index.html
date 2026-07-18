@@ -80,6 +80,10 @@
             background: transparent; color: var(--danger); font-size: 18px;
             padding: 4px 8px; font-weight: 400;
         }
+        .edit {
+            background: transparent; color: var(--muted); font-size: 16px;
+            padding: 4px 8px; font-weight: 400;
+        }
         .empty { color: var(--muted); text-align: center; padding: 24px 0; }
         .error { color: var(--danger); margin: 8px 2px; min-height: 18px; }
         .hidden { display: none; }
@@ -331,6 +335,7 @@
                     <div class="date">${fmtDate(e.createdAt)}${e.categoryGroup ? ' · ' + escapeHtml(e.categoryGroup) : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
                 </div>
                 <div class="amt">${money(e.amount)} ₽</div>
+                <button class="edit" title="Изменить" data-id="${e.id}">✎</button>
                 <button class="del" title="Удалить" data-id="${e.id}">✕</button>
             </div>
         `).join('');
@@ -338,6 +343,35 @@
         listEl.querySelectorAll('.del').forEach((btn) => {
             btn.addEventListener('click', () => del(btn.dataset.id));
         });
+        listEl.querySelectorAll('.edit').forEach((btn) => {
+            btn.addEventListener('click', () => editExpense(btn.dataset.id));
+        });
+    }
+
+    // Правка траты: спрашиваем новую категорию и сумму, шлём PUT (категорию ИИ пересчитываем).
+    async function editExpense(id) {
+        const e = allData.find((x) => x.id === id);
+        if (!e) return;
+        const category = prompt('Категория:', e.category);
+        if (category === null) return;
+        const amountStr = prompt('Сумма:', String(e.amount));
+        if (amountStr === null) return;
+        const amount = parseFloat(amountStr.replace(',', '.'));
+        if (!category.trim() || isNaN(amount) || amount <= 0) {
+            errorEl.textContent = 'Введите категорию и сумму больше нуля';
+            return;
+        }
+        try {
+            const res = await apiFetch(`${API}/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount, category: category.trim(), note: e.note, categoryGroup: null }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            load();
+        } catch (err) {
+            if (!err.message.includes('401')) errorEl.textContent = 'Не удалось изменить: ' + err.message;
+        }
     }
 
     function escapeHtml(s) {

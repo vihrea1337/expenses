@@ -68,6 +68,38 @@ object ExpenseRepository {
         Expenses.deleteWhere { Expenses.id eq id } > 0
     }
 
+    /**
+     * Отредактировать трату: меняем сумму, категорию, заметку и обобщённую категорию.
+     * categoryGroup = null означает "определить заново через ИИ" (мы обнуляем поле, а вызывающий
+     * код запустит классификацию); непустое значение — ручная правка категории.
+     * Возвращает обновлённую трату или null, если траты с таким id нет.
+     */
+    fun updateExpense(
+        id: UUID,
+        amount: Double,
+        category: String,
+        note: String?,
+        categoryGroup: String?,
+    ): Expense? = transaction {
+        val changed = Expenses.update({ Expenses.id eq id }) {
+            it[Expenses.amount] = amount.toBigDecimal()
+            it[Expenses.category] = category
+            it[Expenses.note] = note
+            it[Expenses.categoryGroup] = categoryGroup
+        }
+        if (changed == 0) return@transaction null
+        Expenses.selectAll().where { Expenses.id eq id }.first().let { row ->
+            Expense(
+                id = row[Expenses.id].toString(),
+                amount = row[Expenses.amount].toDouble(),
+                category = row[Expenses.category],
+                note = row[Expenses.note],
+                createdAt = row[Expenses.createdAt].toString(),
+                categoryGroup = row[Expenses.categoryGroup],
+            )
+        }
+    }
+
     // Ключ настройки месячного бюджета в таблице Settings.
     private const val BUDGET_KEY = "monthly_budget"
 

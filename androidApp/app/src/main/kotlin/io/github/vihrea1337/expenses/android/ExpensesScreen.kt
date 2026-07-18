@@ -1,6 +1,7 @@
 package io.github.vihrea1337.expenses.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -34,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,6 +67,8 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     var amount by rememberSaveable { mutableStateOf("") }
     var periodIndex by rememberSaveable { mutableIntStateOf(2) } // по умолчанию "Месяц"
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
+    // Трата, которую сейчас редактируем (null — диалог правки закрыт).
+    var editing by remember { mutableStateOf<Expense?>(null) }
 
     // Расход за текущий календарный месяц — для сравнения с бюджетом.
     val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
@@ -142,6 +148,16 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
                     },
                 )
             }
+            val editingExpense = editing
+            if (editingExpense != null) {
+                EditExpenseDialog(
+                    expense = editingExpense,
+                    onDismiss = { editing = null },
+                    onSave = { cat, amt, group ->
+                        viewModel.editExpense(editingExpense.id, cat, amt, group) { editing = null }
+                    },
+                )
+            }
 
             // --- Переключатель периода ---
             Spacer(Modifier.height(12.dp))
@@ -195,6 +211,7 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
                         items(filtered) { expense ->
                             ExpenseRow(
                                 expense = expense,
+                                onEdit = { editing = expense },
                                 onDelete = { viewModel.deleteExpense(expense.id) },
                             )
                         }
@@ -343,12 +360,71 @@ private fun BudgetDialog(current: Double?, onDismiss: () -> Unit, onSave: (Doubl
     )
 }
 
-/** Одна строка списка: слева категория и дата, справа сумма и кнопка удаления. */
+/** Диалог правки траты: сумма, категория и категория ИИ («авто» = переопределить ИИ). */
 @Composable
-private fun ExpenseRow(expense: Expense, onDelete: () -> Unit) {
+private fun EditExpenseDialog(
+    expense: Expense,
+    onDismiss: () -> Unit,
+    onSave: (category: String, amount: String, group: String?) -> Unit,
+) {
+    // remember(expense.id) — поля сбрасываются, если открыли правку другой траты.
+    var category by remember(expense.id) { mutableStateOf(expense.category) }
+    var amount by remember(expense.id) { mutableStateOf(formatAmount(expense.amount)) }
+    var group by remember(expense.id) { mutableStateOf(expense.categoryGroup ?: "авто") }
+    var menuOpen by remember { mutableStateOf(false) }
+    val groups = listOf(
+        "авто", "еда", "транспорт", "дом", "развлечения",
+        "здоровье", "одежда", "связь", "подарки", "прочее",
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Изменить трату") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Категория") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Сумма") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Box {
+                    TextButton(onClick = { menuOpen = true }) { Text("Категория ИИ: $group ▾") }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        groups.forEach { g ->
+                            DropdownMenuItem(text = { Text(g) }, onClick = { group = g; menuOpen = false })
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(category, amount, if (group == "авто") null else group) }) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+/** Одна строка списка: тап по строке — редактировать, крестик — удалить. */
+@Composable
+private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onEdit() }
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,

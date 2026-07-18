@@ -34,6 +34,10 @@ interface ExpensesApi {
     @DELETE("api/expenses/{id}")
     suspend fun deleteExpense(@Path("id") id: String): Response<Unit>
 
+    /** PUT /api/expenses/{id} — отредактировать трату (сумма/категория/категория ИИ). */
+    @PUT("api/expenses/{id}")
+    suspend fun editExpense(@Path("id") id: String, @Body body: UpdateExpense): Expense
+
     /** GET /api/budget — прочитать месячный бюджет (monthlyBudget = null, если не задан). */
     @GET("api/budget")
     suspend fun getBudget(): BudgetDto

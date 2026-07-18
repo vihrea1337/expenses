@@ -6,6 +6,8 @@ import io.github.vihrea1337.expenses.android.data.ApiClient
 import io.github.vihrea1337.expenses.android.data.BudgetDto
 import io.github.vihrea1337.expenses.android.data.Expense
 import io.github.vihrea1337.expenses.android.data.NewExpense
+import io.github.vihrea1337.expenses.android.data.UpdateExpense
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,10 +93,45 @@ class ExpensesViewModel : ViewModel() {
                     NewExpense(amount = amount, category = category.trim(), note = null),
                 )
                 onSuccess()
-                refresh() // сразу обновляем список, чтобы увидеть новую трату
+                refresh()     // сразу обновляем список, чтобы увидеть новую трату
+                refreshSoon() // и ещё раз через пару секунд — подтянуть ИИ-категорию
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
             }
+        }
+    }
+
+    /**
+     * Отредактировать трату. group = null — категорию переопределит ИИ; иначе ручная правка.
+     * onSuccess закроет диалог.
+     */
+    fun editExpense(id: String, category: String, amountText: String, group: String?, onSuccess: () -> Unit) {
+        val amount = amountText.replace(',', '.').toDoubleOrNull()
+        if (category.isBlank() || amount == null || amount <= 0) {
+            _state.update { it.copy(error = "Введите категорию и сумму больше нуля") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            try {
+                ApiClient.api.editExpense(id, UpdateExpense(amount, category.trim(), null, group))
+                onSuccess()
+                refresh()
+                if (group == null) refreshSoon() // авто-категория проставится в фоне — подтянем позже
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
+            }
+        }
+    }
+
+    /**
+     * Повторно обновить через пару секунд. Нужно, потому что обобщённую категорию сервер
+     * проставляет в фоне (ИИ), и к первому refresh она может быть ещё не готова.
+     */
+    private fun refreshSoon() {
+        viewModelScope.launch {
+            delay(3000)
+            refresh()
         }
     }
 

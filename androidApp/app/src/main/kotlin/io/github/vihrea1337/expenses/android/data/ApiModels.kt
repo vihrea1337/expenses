@@ -33,3 +33,15 @@ data class NewExpense(
 data class BudgetDto(
     val monthlyBudget: Double? = null,
 )
+
+/**
+ * Данные для редактирования траты (тело PUT /api/expenses/{id}).
+ * categoryGroup = null — переопределить категорию через ИИ; иначе ручная правка.
+ */
+@Serializable
+data class UpdateExpense(
+    val amount: Double,
+    val category: String,
+    val note: String? = null,
+    val categoryGroup: String? = null,
+)
