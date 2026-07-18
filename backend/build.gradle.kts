@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "io.github.vihrea1337.expenses"
-version = "0.0.1"
+version = "1.0.0"
 
 application {
     // Класс с функцией main(), с которого стартует сервер.
