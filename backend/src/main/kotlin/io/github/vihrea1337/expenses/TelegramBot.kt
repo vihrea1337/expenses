@@ -172,6 +172,8 @@ private fun handleText(text: String): String {
                 "Не понял 🤔 Напиши категорию и сумму, например: кофе 200\n(справка — /help)"
             } else {
                 val saved = ExpenseRepository.add(new)
+                // Обобщённую категорию проставит ИИ в фоне.
+                Classifier.scheduleClassification(saved.id, saved.category)
                 "✅ Записал: ${saved.category} — ${formatMoney(saved.amount)} ₽"
             }
         }
@@ -218,19 +220,19 @@ private fun totalText(): String {
     return "Всего: ${formatMoney(total)} ₽ за ${all.size} трат.\nСегодня: ${formatMoney(todayTotal)} ₽"
 }
 
-/** Разбивка трат по категориям (топ-10) с суммой и долей в процентах. */
+/** Разбивка трат по обобщённым категориям (от ИИ) с суммой и долей в процентах. */
 private fun statsText(): String {
     val all = ExpenseRepository.all()
     if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
     val total = all.sumOf { it.amount }
-    val byCategory = all
-        .groupBy { it.category }
-        .map { (category, list) -> category to list.sumOf { it.amount } }
+    val byGroup = all
+        .groupBy { it.categoryGroup ?: "без категории" }
+        .map { (group, list) -> group to list.sumOf { it.amount } }
         .sortedByDescending { it.second }
         .take(10)
-    val lines = byCategory.joinToString("\n") { (category, sum) ->
+    val lines = byGroup.joinToString("\n") { (group, sum) ->
         val percent = if (total > 0) Math.round(sum / total * 100) else 0
-        "• $category — ${formatMoney(sum)} ₽ ($percent%)"
+        "• $group — ${formatMoney(sum)} ₽ ($percent%)"
     }
     return "Траты по категориям (всего ${formatMoney(total)} ₽):\n$lines"
 }

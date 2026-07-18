@@ -5,6 +5,7 @@ import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.upsert
 import java.time.LocalDateTime
 import java.util.UUID
@@ -28,6 +29,7 @@ object ExpenseRepository {
                 category = row[Expenses.category],
                 note = row[Expenses.note],
                 createdAt = row[Expenses.createdAt].toString(),
+                categoryGroup = row[Expenses.categoryGroup],
             )
         }
     }
@@ -90,5 +92,18 @@ object ExpenseRepository {
                 it[Settings.value] = value.toString()
             }
         }
+    }
+
+    /** Проставить обобщённую категорию (её вычислил ИИ) конкретной трате. */
+    fun updateGroup(id: UUID, group: String) = transaction {
+        Expenses.update({ Expenses.id eq id }) {
+            it[categoryGroup] = group
+        }
+    }
+
+    /** Все траты, у которых категория ещё не проставлена — пары (id, описание). */
+    fun expensesWithoutGroup(): List<Pair<UUID, String>> = transaction {
+        Expenses.selectAll().where { Expenses.categoryGroup.isNull() }
+            .map { it[Expenses.id] to it[Expenses.category] }
     }
 }

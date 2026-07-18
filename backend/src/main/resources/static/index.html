@@ -284,21 +284,39 @@
         totalEl.innerHTML = `Всего за период: <b>${money(sum)} ₽</b> · ${data.length} трат`;
     }
 
-    // Разбивка по категориям: топ-8 с суммой, долей и полоской.
+    // Разбивка по обобщённым категориям (от ИИ): топ-8 с суммой, долей и полоской.
     function renderBreakdown(data) {
         if (data.length === 0) { breakdownEl.classList.add('hidden'); return; }
         breakdownEl.classList.remove('hidden');
         const total = data.reduce((s, e) => s + e.amount, 0);
         const map = {};
-        data.forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
+        data.forEach((e) => {
+            const g = e.categoryGroup || 'без категории';
+            map[g] = (map[g] || 0) + e.amount;
+        });
         const rows = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
-        breakdownEl.innerHTML = '<div class="bd-title">По категориям</div>' + rows.map(([cat, sum]) => {
-            const pct = total > 0 ? Math.round(sum / total * 100) : 0;
-            return `<div class="bd-row">
-                <div class="bd-head"><span>${escapeHtml(cat)}</span><span>${money(sum)} ₽ · ${pct}%</span></div>
-                <div class="bd-bar"><div style="width:${pct}%"></div></div>
-            </div>`;
-        }).join('');
+        breakdownEl.innerHTML = `<div class="topbar"><span class="bd-title">По категориям</span>
+            <button class="linkbtn" id="reclassifyBtn" title="Определить категории через ИИ">↻ ИИ</button></div>`
+            + rows.map(([cat, sum]) => {
+                const pct = total > 0 ? Math.round(sum / total * 100) : 0;
+                return `<div class="bd-row">
+                    <div class="bd-head"><span>${escapeHtml(cat)}</span><span>${money(sum)} ₽ · ${pct}%</span></div>
+                    <div class="bd-bar"><div style="width:${pct}%"></div></div>
+                </div>`;
+            }).join('');
+        document.getElementById('reclassifyBtn').addEventListener('click', reclassify);
+    }
+
+    // Попросить сервер проставить категории тратам, у которых их ещё нет (через ИИ).
+    async function reclassify() {
+        try {
+            const res = await apiFetch('/api/reclassify', { method: 'POST' });
+            const r = res.ok ? await res.json() : { pending: 0 };
+            errorEl.textContent = `ИИ обрабатывает ${r.pending} трат без категории… обновлю через несколько секунд.`;
+            setTimeout(load, 5000);
+        } catch (e) {
+            if (!e.message.includes('401')) errorEl.textContent = 'Не удалось запустить: ' + e.message;
+        }
     }
 
     function renderList(data) {
@@ -310,7 +328,7 @@
             <div class="row">
                 <div class="info">
                     <div class="cat">${escapeHtml(e.category)}</div>
-                    <div class="date">${fmtDate(e.createdAt)}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+                    <div class="date">${fmtDate(e.createdAt)}${e.categoryGroup ? ' · ' + escapeHtml(e.categoryGroup) : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
                 </div>
                 <div class="amt">${money(e.amount)} ₽</div>
                 <button class="del" title="Удалить" data-id="${e.id}">✕</button>

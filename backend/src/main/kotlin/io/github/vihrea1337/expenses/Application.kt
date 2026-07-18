@@ -112,6 +112,8 @@ private fun Route.apiRoutes() {
     post("/api/expenses") {
         val body = call.receive<NewExpense>()
         val saved = ExpenseRepository.add(body)
+        // Обобщённую категорию проставит ИИ в фоне — ответ не задерживаем.
+        Classifier.scheduleClassification(saved.id, saved.category)
         call.respond(saved)
     }
 
@@ -140,6 +142,11 @@ private fun Route.apiRoutes() {
         val body = call.receive<BudgetDto>()
         ExpenseRepository.setBudget(body.monthlyBudget)
         call.respond(BudgetDto(ExpenseRepository.getBudget()))
+    }
+
+    // Переклассифицировать в фоне все траты без категории (например, добавленные до включения ИИ).
+    post("/api/reclassify") {
+        call.respond(ReclassifyResult(Classifier.reclassifyPending()))
     }
 }
 
@@ -181,6 +188,9 @@ fun configureDatabase() {
     //    любые обращения к базе в Exposed выполняются внутри транзакции.
     transaction {
         SchemaUtils.create(Expenses, Settings)
+        // SchemaUtils.create не меняет уже существующие таблицы, поэтому новый столбец
+        // для ИИ-категории добавляем вручную (ADD COLUMN IF NOT EXISTS — безопасно повторно).
+        exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_group VARCHAR(50)")
     }
 }
 
@@ -196,3 +206,7 @@ data class HealthResponse(val status: String)
  */
 @Serializable
 data class BudgetDto(val monthlyBudget: Double? = null)
+
+/** Результат переклассификации: сколько трат без категории взято в фоновую обработку. */
+@Serializable
+data class ReclassifyResult(val pending: Int)

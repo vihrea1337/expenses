@@ -17,6 +17,8 @@ data class Expense(
     val category: String,
     val note: String? = null,
     val createdAt: String,
+    // Обобщённая категория от ИИ ("еда", ...); null, пока не проставлена.
+    val categoryGroup: String? = null,
 )
 
 @Serializable

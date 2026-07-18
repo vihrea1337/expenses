@@ -70,9 +70,10 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     // Траты за выбранный период; итог и разбивка считаются из них.
     val filtered = state.expenses.filter { inPeriod(it.createdAt, periodIndex) }
     val total = filtered.sumOf { it.amount }
+    // Группируем по обобщённой категории от ИИ (если ещё не проставлена — «без категории»).
     val breakdown = filtered
-        .groupBy { it.category }
-        .map { (cat, list) -> cat to list.sumOf { it.amount } }
+        .groupBy { it.categoryGroup ?: "без категории" }
+        .map { (group, list) -> group to list.sumOf { it.amount } }
         .sortedByDescending { it.second }
         .take(8)
 
@@ -354,8 +355,11 @@ private fun ExpenseRow(expense: Expense, onDelete: () -> Unit) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(expense.category, style = MaterialTheme.typography.bodyLarge)
+            // Дата, а рядом обобщённая категория от ИИ (если уже проставлена).
+            val subtitle = expense.createdAt.take(16).replace('T', ' ') +
+                (expense.categoryGroup?.let { " · $it" } ?: "")
             Text(
-                expense.createdAt.take(16).replace('T', ' '),
+                subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
