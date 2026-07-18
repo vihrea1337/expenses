@@ -20,9 +20,10 @@ fun parseExpense(text: String): NewExpense? {
     // Меньше двух слов — нет ни категории, ни суммы. Разбирать нечего.
     if (words.size < 2) return null
 
-    // Последнее слово пытаемся прочитать как число. toDoubleOrNull безопаснее toDouble:
-    // на нечисле ("дорого") он не роняет программу, а спокойно возвращает null.
-    val amount = words.last().toDoubleOrNull() ?: return null
+    // Последнее слово пытаемся прочитать как число. Запятую принимаем как разделитель
+    // дробной части (150,5 -> 150.5). toDoubleOrNull безопаснее toDouble: на нечисле
+    // ("дорого") он не роняет программу, а спокойно возвращает null.
+    val amount = words.last().replace(',', '.').toDoubleOrNull() ?: return null
     // Отрицательная или нулевая сумма для траты бессмысленна.
     if (amount <= 0) return null
 
