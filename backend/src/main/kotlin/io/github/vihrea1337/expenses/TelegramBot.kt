@@ -239,7 +239,28 @@ private fun handleText(user: User, text: String): String {
     // Токен доступа — чтобы пользоваться этим же аккаунтом в приложении и на сайте.
     if (lower == "/token") {
         return "Твой токен доступа:\n${user.token}\n\n" +
-            "Вставь его в приложении или на сайте — и увидишь там эти же траты."
+            "Вставь его в приложении или на сайте — и увидишь там эти же траты.\n" +
+            "Или наоборот: /link <токен из приложения> — привязать бот к тому аккаунту."
+    }
+
+    // Привязать бот к аккаунту из приложения/веба (объединить данные в один аккаунт).
+    if (lower == "/link") {
+        return "Пришли свой токен так: /link <токен>\n(токен виден в приложении и на сайте)"
+    }
+    if (lower.startsWith("/link ")) {
+        val targetToken = trimmed.substringAfter(' ').trim()
+        val tgId = user.telegramId ?: return "Не получилось определить твой Telegram."
+        val target = UserRepository.findByToken(targetToken)
+        return when {
+            targetToken.isEmpty() -> "Пришли так: /link <токен>"
+            target == null -> "Токен не найден. Проверь и пришли ещё раз: /link <токен>"
+            target.id == user.id -> "Этот аккаунт уже привязан к тебе."
+            target.telegramId != null -> "Этот аккаунт уже привязан к другому Telegram."
+            else -> {
+                UserRepository.linkTelegram(fromUserId = user.id, toUserId = target.id, telegramId = tgId)
+                "✅ Готово! Теперь бот работает с аккаунтом «${target.displayName}». Данные объединены."
+            }
+        }
     }
 
     // Бюджет: "/budget" или "бюджет" — показать статус; "бюджет 30000" — задать лимит.
@@ -288,6 +309,7 @@ private fun helpText(): String = """
     /stats — траты по категориям
     /budget — бюджет на месяц (задать: бюджет 30000)
     /token — токен для входа в приложение/на сайт
+    /link — привязать бот к аккаунту (/link токен)
     /help — эта справка
 """.trimIndent()
 

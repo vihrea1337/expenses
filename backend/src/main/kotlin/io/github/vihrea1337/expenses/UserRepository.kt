@@ -90,6 +90,22 @@ object UserRepository {
     }
 
     /**
+     * Привязать Telegram к целевому аккаунту (toUserId): переносим траты со старого
+     * (авто-созданного бот-)аккаунта fromUserId на целевой, удаляем старый (это освобождает
+     * уникальный telegram_id), и ставим telegram_id целевому. Так бот начинает работать
+     * с тем же аккаунтом, что приложение/веб.
+     */
+    fun linkTelegram(fromUserId: UUID, toUserId: UUID, telegramId: Long) = transaction {
+        Expenses.update({ Expenses.userId eq fromUserId }) {
+            it[Expenses.userId] = toUserId
+        }
+        Users.deleteWhere { Users.id eq fromUserId }
+        Users.update({ Users.id eq toUserId }) {
+            it[Users.telegramId] = telegramId
+        }
+    }
+
+    /**
      * Бутстрап "владельца" и миграция старых данных (одноразово при старте).
      * Если задан ownerToken (переменная API_TOKEN) — создаём/находим пользователя с этим токеном,
      * привязываем к нему все бесхозные (user_id IS NULL) траты и переносим глобальный бюджет.
