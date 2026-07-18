@@ -51,6 +51,13 @@ dependencies {
     // (открывать новое подключение на каждый запрос дорого). Понадобится на шаге подключения.
     implementation("com.zaxxer:HikariCP:6.2.1")
 
+    // --- HTTP-клиент для Telegram Bot API ---
+    // До сих пор наш сервер только ОТВЕЧАЛ на запросы. Боту нужно наоборот — САМОМУ
+    // ходить к Telegram (спрашивать новые сообщения и слать ответы). Для этого нужен клиент.
+    implementation("io.ktor:ktor-client-core")                 // ядро HTTP-клиента
+    implementation("io.ktor:ktor-client-cio")                  // движок: кто реально шлёт запросы по сети
+    implementation("io.ktor:ktor-client-content-negotiation")  // разбирать JSON-ответы Telegram в наши классы
+
     // Для будущих тестов сервера (поднимают Ktor без реального порта).
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test"))

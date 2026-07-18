@@ -16,11 +16,7 @@ import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.time.LocalDateTime
-import java.util.UUID
 
 /**
  * Точка входа. Поднимает HTTP-сервер на движке Netty.
@@ -30,6 +26,15 @@ import java.util.UUID
  * Наружу в интернет порт 8080 не торчит — так безопаснее.
  */
 fun main() {
+    // 1. Первым делом подключаемся к базе. Её используют И HTTP-эндпоинты, И Telegram-бот,
+    //    поэтому подключение должно быть готово ДО того, как хоть кто-то начнёт писать в базу.
+    configureDatabase()
+
+    // 2. Запускаем Telegram-бота (моторчик) в фоне. Если токена нет — просто не стартует,
+    //    а сервер поднимается как обычно. К этому моменту база уже подключена — бот может писать.
+    startBot()
+
+    // 3. Поднимаем HTTP-сервер и ждём (wait = true — main не завершается, сервер работает).
     embeddedServer(Netty, port = 8080, host = "127.0.0.1") {
         module()
     }.start(wait = true)
@@ -40,50 +45,25 @@ fun main() {
  * Вынесено в отдельную функцию, чтобы позже переиспользовать её в тестах.
  */
 fun Application.module() {
-    // Подключаемся к базе и создаём таблицы ДО того, как сервер начнёт принимать запросы.
-    configureDatabase()
-
-    // Плагин, который умеет превращать наши классы в JSON при ответе.
+    // Плагин, который умеет превращать наши классы в JSON при ответе (и обратно при приёме).
     install(ContentNegotiation) {
         json()
     }
 
     routing {
+        // Список всех трат. Вся работа с базой — внутри ExpenseRepository.
         get("/api/expenses") {
-            val list = transaction{
-                Expenses.selectAll().map { row ->
-                    Expense(
-                        id = row[Expenses.id].toString(),
-                        amount = row[Expenses.amount].toDouble(),
-                        category = row[Expenses.category],
-                        note = row[Expenses.note],
-                        createdAt = row[Expenses.createdAt].toString(),
-                    )
-                }
-            }
-            call.respond(list)
+            call.respond(ExpenseRepository.all())
         }
+
+        // Добавить трату. Тело запроса (JSON) превращается в NewExpense,
+        // репозиторий кладёт его в базу и возвращает уже полноценную запись с id и временем.
         post("/api/expenses") {
             val body = call.receive<NewExpense>()
-            val id = UUID.randomUUID()
-            val now = LocalDateTime.now()
-            transaction {
-                Expenses.insert {
-                    it[Expenses.id] = id
-                    it[Expenses.amount] = body.amount.toBigDecimal()
-                    it[Expenses.category] = body.category
-                    it[Expenses.note] = body.note
-                    it[Expenses.createdAt] = now
-                }
-            }
-            call.respond(Expense(id = id.toString(),
-                amount = body.amount,
-                category = body.category,
-                note = body.note,
-                createdAt = now.toString()
-
-            ))
+            val saved = ExpenseRepository.add(body)
+            call.respond(saved)
         }
+
         // Проверка "жив ли сервер". Открой в браузере http://127.0.0.1:8080/health
         get("/health") {
             call.respond(HealthResponse(status = "ok"))
@@ -94,7 +74,7 @@ fun Application.module() {
 /**
  * Подключение к базе данных PostgreSQL и создание таблиц.
  *
- * Вызывается один раз при старте сервера. От Ktor не зависит — это обычная функция,
+ * Вызывается один раз при старте (из main). От Ktor не зависит — это обычная функция,
  * поэтому её легко переиспользовать (например, в тестах или отдельном скрипте).
  */
 fun configureDatabase() {
