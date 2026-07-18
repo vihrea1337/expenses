@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,8 +73,12 @@ private val PERIODS = listOf("Сегодня", "Неделя", "Месяц", "В
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
+fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Обновляем данные при каждом входе на экран (в т.ч. после смены аккаунта — ViewModel
+    // живёт на уровне Activity и переживает выход, поэтому нужен явный рефреш).
+    LaunchedEffect(Unit) { viewModel.refresh() }
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }       // 0 — Траты, 1 — Аналитика
     var periodIndex by rememberSaveable { mutableIntStateOf(2) }       // по умолчанию «Месяц»
@@ -91,7 +96,12 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(if (selectedTab == 0) "Аналитика" else "Мои траты") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(if (selectedTab == 0) "Аналитика" else "Мои траты") },
+                actions = { TextButton(onClick = onLogout) { Text("Выйти") } },
+            )
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(

@@ -1,6 +1,6 @@
 package io.github.vihrea1337.expenses.android.data
 
-import io.github.vihrea1337.expenses.android.BuildConfig
+import io.github.vihrea1337.expenses.android.TokenStore
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -45,6 +45,14 @@ interface ExpensesApi {
     /** PUT /api/budget — задать/сбросить месячный бюджет. */
     @PUT("api/budget")
     suspend fun setBudget(@Body body: BudgetDto): BudgetDto
+
+    /** POST /api/register — создать аккаунт (без токена), получить токен доступа. */
+    @POST("api/register")
+    suspend fun register(@Body body: RegisterRequest): UserResponse
+
+    /** GET /api/me — проверить токен и узнать имя текущего пользователя. */
+    @GET("api/me")
+    suspend fun me(): MeResponse
 }
 
 /**
@@ -65,8 +73,10 @@ object ApiClient {
         val httpClient = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
-                if (BuildConfig.API_TOKEN.isNotEmpty()) {
-                    builder.addHeader("Authorization", "Bearer ${BuildConfig.API_TOKEN}")
+                // Токен текущего пользователя (после входа/регистрации). Для /api/register его нет — ок.
+                val token = TokenStore.token
+                if (!token.isNullOrEmpty()) {
+                    builder.addHeader("Authorization", "Bearer $token")
                 }
                 chain.proceed(builder.build())
             }

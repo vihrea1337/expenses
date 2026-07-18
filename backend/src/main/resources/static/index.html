@@ -110,7 +110,8 @@
             <button id="loginBtn" type="submit">Войти</button>
         </form>
         <div class="error" id="loginError"></div>
-        <div class="hint">Токен — тот же, что задан на сервере (API_TOKEN). Он сохранится в этом браузере.</div>
+        <div class="hint">Нет аккаунта? Создай новый — получишь токен для входа.</div>
+        <button id="registerBtn" type="button" style="width:100%;margin-top:8px">Зарегистрироваться</button>
     </div>
 
     <!-- Основной интерфейс: показывается после входа. -->
@@ -442,6 +443,27 @@
         document.getElementById('token').value = '';
         showApp();
         load();
+    });
+
+    // Регистрация: спрашиваем имя, создаём аккаунт, сохраняем токен и входим.
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+        const name = prompt('Ваше имя (для нового аккаунта):');
+        if (name === null) return;
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() || 'Пользователь' }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            setToken(data.token);
+            alert('Аккаунт создан! Твой токен (сохрани его — он нужен для входа в приложении и связи с ботом):\n\n' + data.token);
+            showApp();
+            load();
+        } catch (e) {
+            loginError.textContent = 'Не удалось зарегистрироваться: ' + e.message;
+        }
     });
 
     document.getElementById('logoutBtn').addEventListener('click', () => {

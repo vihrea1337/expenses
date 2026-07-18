@@ -45,3 +45,15 @@ data class UpdateExpense(
     val note: String? = null,
     val categoryGroup: String? = null,
 )
+
+/** Тело регистрации: имя пользователя. */
+@Serializable
+data class RegisterRequest(val name: String)
+
+/** Ответ регистрации: токен доступа и имя. */
+@Serializable
+data class UserResponse(val token: String, val name: String)
+
+/** Ответ /api/me: кто я. */
+@Serializable
+data class MeResponse(val name: String)
