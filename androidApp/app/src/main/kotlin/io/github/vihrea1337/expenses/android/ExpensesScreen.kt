@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,8 +28,12 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -61,170 +67,280 @@ import kotlin.math.roundToInt
 private val PERIODS = listOf("Сегодня", "Неделя", "Месяц", "Всё")
 
 /**
- * Главный экран: форма добавления, переключатель периода, разбивка по категориям и список трат.
+ * Главный экран. Две вкладки внизу: «Траты» (список) и «Аналитика» (кольцо + бюджет).
+ * Добавление траты — по кнопке «+» (форма выезжает снизу). Период — общий для обеих вкладок.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
-    // Подписываемся на состояние из ViewModel: как только оно меняется — экран перерисуется.
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    // Поля ввода и выбранный период живут в экране. rememberSaveable — переживают поворот.
-    var category by rememberSaveable { mutableStateOf("") }
-    var amount by rememberSaveable { mutableStateOf("") }
-    var periodIndex by rememberSaveable { mutableIntStateOf(2) } // по умолчанию "Месяц"
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }       // 0 — Траты, 1 — Аналитика
+    var periodIndex by rememberSaveable { mutableIntStateOf(2) }       // по умолчанию «Месяц»
+    var showAddSheet by rememberSaveable { mutableStateOf(false) }     // открыта ли форма добавления
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
-    // Трата, которую сейчас редактируем (null — диалог правки закрыт).
-    var editing by remember { mutableStateOf<Expense?>(null) }
+    var editing by remember { mutableStateOf<Expense?>(null) }         // редактируемая трата
 
-    // Расход за текущий календарный месяц — для сравнения с бюджетом.
-    val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
-
-    // Траты за выбранный период; итог и разбивка считаются из них.
+    // Производные данные под выбранный период.
     val filtered = state.expenses.filter { inPeriod(it.createdAt, periodIndex) }
     val total = filtered.sumOf { it.amount }
-    // Группируем по обобщённой категории от ИИ (если ещё не проставлена — «без категории»).
-    // Показываем все группы (их не больше ~10), чтобы доли складывались в целое кольцо.
     val breakdown = filtered
         .groupBy { it.categoryGroup ?: "без категории" }
         .map { (group, list) -> group to list.sumOf { it.amount } }
         .sortedByDescending { it.second }
+    val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Мои траты") }) },
+        topBar = { TopAppBar(title = { Text(if (selectedTab == 0) "Мои траты" else "Аналитика") }) },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Text("📋") },
+                    label = { Text("Траты") },
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Text("📊") },
+                    label = { Text("Аналитика") },
+                )
+            }
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAddSheet = true }) {
+                Text("+", style = MaterialTheme.typography.headlineMedium)
+            }
+        },
     ) { padding ->
         Column(
             Modifier
                 .padding(padding)
-                .padding(16.dp)
                 .fillMaxSize(),
         ) {
-            // --- Форма добавления ---
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = category,
-                    onValueChange = { category = it },
-                    label = { Text("Категория") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Сумма") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.width(120.dp),
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    viewModel.addExpense(category, amount) {
-                        category = ""
-                        amount = ""
-                    }
-                },
-                enabled = !state.isLoading,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Добавить трату")
-            }
-
+            // Общий переключатель периода (виден на обеих вкладках).
+            PeriodSelector(
+                periodIndex = periodIndex,
+                isLoading = state.isLoading,
+                onSelect = { periodIndex = it },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
             val error = state.error
             if (error != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(error, color = MaterialTheme.colorScheme.error)
+                Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(4.dp))
             }
 
-            // --- Бюджет на месяц ---
-            Spacer(Modifier.height(12.dp))
-            BudgetCard(
-                budget = state.monthlyBudget,
-                spent = monthSpent,
-                onEdit = { showBudgetDialog = true },
+            when (selectedTab) {
+                0 -> ListTab(
+                    expenses = filtered,
+                    total = total,
+                    isLoading = state.isLoading,
+                    onRefresh = { viewModel.refresh() },
+                    onEdit = { editing = it },
+                    onDelete = { viewModel.deleteExpense(it) },
+                )
+                else -> AnalyticsTab(
+                    breakdown = breakdown,
+                    total = total,
+                    budget = state.monthlyBudget,
+                    monthSpent = monthSpent,
+                    onEditBudget = { showBudgetDialog = true },
+                )
+            }
+        }
+
+        // --- Диалоги и шторка ввода (рисуются поверх) ---
+        if (showBudgetDialog) {
+            BudgetDialog(
+                current = state.monthlyBudget,
+                onDismiss = { showBudgetDialog = false },
+                onSave = { value ->
+                    viewModel.setBudget(value)
+                    showBudgetDialog = false
+                },
             )
-            if (showBudgetDialog) {
-                BudgetDialog(
-                    current = state.monthlyBudget,
-                    onDismiss = { showBudgetDialog = false },
-                    onSave = { value ->
-                        viewModel.setBudget(value)
-                        showBudgetDialog = false
-                    },
+        }
+        val editingExpense = editing
+        if (editingExpense != null) {
+            EditExpenseDialog(
+                expense = editingExpense,
+                onDismiss = { editing = null },
+                onSave = { cat, amt, group ->
+                    viewModel.editExpense(editingExpense.id, cat, amt, group) { editing = null }
+                },
+            )
+        }
+        if (showAddSheet) {
+            ModalBottomSheet(onDismissRequest = { showAddSheet = false }) {
+                AddExpenseSheet(
+                    viewModel = viewModel,
+                    error = state.error,
+                    onDone = { showAddSheet = false },
                 )
             }
-            val editingExpense = editing
-            if (editingExpense != null) {
-                EditExpenseDialog(
-                    expense = editingExpense,
-                    onDismiss = { editing = null },
-                    onSave = { cat, amt, group ->
-                        viewModel.editExpense(editingExpense.id, cat, amt, group) { editing = null }
-                    },
-                )
-            }
+        }
+    }
+}
 
-            // --- Переключатель периода ---
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PERIODS.forEachIndexed { index, label ->
-                    FilterChip(
-                        selected = periodIndex == index,
-                        onClick = { periodIndex = index },
-                        label = { Text(label) },
-                    )
-                }
-                if (state.isLoading) {
-                    Spacer(Modifier.width(4.dp))
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                }
-            }
+/** Строка кнопок периода (Сегодня/Неделя/Месяц/Всё) + крутилка загрузки. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PeriodSelector(
+    periodIndex: Int,
+    isLoading: Boolean,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PERIODS.forEachIndexed { index, label ->
+            FilterChip(
+                selected = periodIndex == index,
+                onClick = { onSelect(index) },
+                label = { Text(label) },
+            )
+        }
+        if (isLoading) {
+            Spacer(Modifier.width(4.dp))
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+    }
+}
 
-            // --- Итог + список с "потяни вниз, чтобы обновить" ---
-            Spacer(Modifier.height(12.dp))
-            PullToRefreshBox(
-                isRefreshing = state.isLoading,
-                onRefresh = { viewModel.refresh() },
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                LazyColumn(Modifier.fillMaxSize()) {
+/** Вкладка «Траты»: итог за период + список на весь экран (потяни вниз — обновить). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ListTab(
+    expenses: List<Expense>,
+    total: Double,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    onEdit: (Expense) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        Text(
+            "Всего за период: ${formatAmount(total)} ₽ · ${expenses.size} трат",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        PullToRefreshBox(
+            isRefreshing = isLoading,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (expenses.isEmpty() && !isLoading) {
                     item {
-                        Text(
-                            "Всего за период: ${formatAmount(total)} ₽ · ${filtered.size} трат",
-                            style = MaterialTheme.typography.titleMedium,
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 32.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("За этот период трат нет. Добавь по кнопке «+».")
+                        }
+                    }
+                } else {
+                    items(expenses) { expense ->
+                        ExpenseRow(
+                            expense = expense,
+                            onEdit = { onEdit(expense) },
+                            onDelete = { onDelete(expense.id) },
                         )
                     }
-                    if (breakdown.isNotEmpty()) {
-                        item { BreakdownSection(rows = breakdown, total = total) }
-                    }
-                    item {
-                        Spacer(Modifier.height(8.dp))
-                        HorizontalDivider()
-                    }
-                    if (filtered.isEmpty() && !state.isLoading) {
-                        item {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 32.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("За этот период трат нет.")
-                            }
-                        }
-                    } else {
-                        items(filtered) { expense ->
-                            ExpenseRow(
-                                expense = expense,
-                                onEdit = { editing = expense },
-                                onDelete = { viewModel.deleteExpense(expense.id) },
-                            )
-                        }
-                    }
                 }
             }
+        }
+    }
+}
+
+/** Вкладка «Аналитика»: кольцевая диаграмма по категориям + карточка бюджета. */
+@Composable
+private fun AnalyticsTab(
+    breakdown: List<Pair<String, Double>>,
+    total: Double,
+    budget: Double?,
+    monthSpent: Double,
+    onEditBudget: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+    ) {
+        if (breakdown.isEmpty()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Нет данных за период.")
+            }
+        } else {
+            BreakdownSection(rows = breakdown, total = total)
+        }
+        Spacer(Modifier.height(12.dp))
+        BudgetCard(budget = budget, spent = monthSpent, onEdit = onEditBudget)
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** Форма добавления траты (в шторке снизу). После успешного добавления шторка закрывается. */
+@Composable
+private fun AddExpenseSheet(viewModel: ExpensesViewModel, error: String?, onDone: () -> Unit) {
+    var category by rememberSaveable { mutableStateOf("") }
+    var amount by rememberSaveable { mutableStateOf("") }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .padding(bottom = 24.dp),
+    ) {
+        Text("Новая трата", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = category,
+            onValueChange = { category = it },
+            label = { Text("Категория") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = amount,
+            onValueChange = { amount = it },
+            label = { Text("Сумма") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (error != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(error, color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = { viewModel.addExpense(category, amount) { onDone() } },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Добавить трату")
         }
     }
 }
@@ -398,7 +514,9 @@ private fun BudgetDialog(current: Double?, onDismiss: () -> Unit, onSave: (Doubl
             TextButton(onClick = {
                 val value = text.replace(',', '.').toDoubleOrNull()
                 onSave(if (value != null && value > 0) value else null)
-            }) { Text("Сохранить") }
+            }) {
+                Text("Сохранить")
+            }
         },
         dismissButton = {
             Row {
@@ -467,7 +585,7 @@ private fun EditExpenseDialog(
     )
 }
 
-/** Одна строка списка: тап по строке — редактировать, крестик — удалить. */
+/** Одна строка списка: тап по строке или ✎ — редактировать, ✕ — удалить. */
 @Composable
 private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(
@@ -493,7 +611,6 @@ private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Uni
             "${formatAmount(expense.amount)} ₽",
             style = MaterialTheme.typography.titleMedium,
         )
-        // Видимая подсказка, что трату можно редактировать (то же делает тап по строке).
         TextButton(onClick = onEdit) { Text("✎") }
         TextButton(onClick = onDelete) { Text("✕") }
     }
@@ -502,7 +619,7 @@ private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Uni
 
 /** Попадает ли трата в выбранный период. Неделя = последние 7 дней, месяц = последние 30 дней. */
 private fun inPeriod(createdAt: String, periodIndex: Int): Boolean {
-    if (periodIndex == 3) return true // "Всё"
+    if (periodIndex == 3) return true // «Всё»
     val date = runCatching { LocalDate.parse(createdAt.take(10)) }.getOrNull() ?: return true
     val today = LocalDate.now()
     return when (periodIndex) {
