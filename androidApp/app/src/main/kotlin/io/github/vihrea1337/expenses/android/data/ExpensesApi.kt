@@ -1,7 +1,9 @@
 package io.github.vihrea1337.expenses.android.data
 
+import io.github.vihrea1337.expenses.android.BuildConfig
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -44,8 +46,22 @@ object ApiClient {
         // ignoreUnknownKeys = true — если сервер пришлёт лишние поля, не падаем.
         val json = Json { ignoreUnknownKeys = true }
         val contentType = "application/json".toMediaType()
+
+        // OkHttp-клиент с "перехватчиком" (interceptor): он вклинивается в каждый исходящий
+        // запрос и добавляет заголовок Authorization с токеном, чтобы сервер нас пустил.
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val builder = chain.request().newBuilder()
+                if (BuildConfig.API_TOKEN.isNotEmpty()) {
+                    builder.addHeader("Authorization", "Bearer ${BuildConfig.API_TOKEN}")
+                }
+                chain.proceed(builder.build())
+            }
+            .build()
+
         Retrofit.Builder()
             .baseUrl(BASE_URL)
+            .client(httpClient)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
             .create(ExpensesApi::class.java)

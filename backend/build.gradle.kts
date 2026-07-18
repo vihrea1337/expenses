@@ -35,6 +35,8 @@ dependencies {
     // Согласование форматов ответа + JSON через kotlinx.serialization.
     implementation("io.ktor:ktor-server-content-negotiation")
     implementation("io.ktor:ktor-serialization-kotlinx-json")
+    // Авторизация: проверка токена (Bearer) на защищённых ручках /api/*.
+    implementation("io.ktor:ktor-server-auth")
     // Логгер — чтобы видеть, что происходит на сервере.
     implementation("ch.qos.logback:logback-classic:1.5.12")
 

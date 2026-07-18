@@ -1,4 +1,12 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+// Токен доступа к API читаем из local.properties (этот файл в .gitignore, в репозиторий не попадёт).
+// Значение подставится в сгенерированный класс BuildConfig как BuildConfig.API_TOKEN.
+val apiToken: String = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}.getProperty("API_TOKEN", "")
 
 plugins {
     id("com.android.application")
@@ -20,6 +28,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        // Токен доступа к API — доступен в коде как BuildConfig.API_TOKEN.
+        buildConfigField("String", "API_TOKEN", "\"$apiToken\"")
     }
 
     buildTypes {
@@ -37,6 +47,8 @@ android {
     buildFeatures {
         // Включаем Jetpack Compose (декларативный UI).
         compose = true
+        // Включаем генерацию класса BuildConfig (нужен для BuildConfig.API_TOKEN).
+        buildConfig = true
     }
 
     // Разрешаем держать исходники в папке src/main/kotlin (а не только java).

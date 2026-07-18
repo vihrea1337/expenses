@@ -6,12 +6,17 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.auth.Authentication
+import io.ktor.server.auth.UserIdPrincipal
+import io.ktor.server.auth.authenticate
+import io.ktor.server.auth.bearer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.http.content.staticResources
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -54,43 +59,74 @@ fun Application.module() {
         json()
     }
 
-    routing {
-        // Список всех трат. Вся работа с базой — внутри ExpenseRepository.
-        get("/api/expenses") {
-            call.respond(ExpenseRepository.all())
-        }
-
-        // Добавить трату. Тело запроса (JSON) превращается в NewExpense,
-        // репозиторий кладёт его в базу и возвращает уже полноценную запись с id и временем.
-        post("/api/expenses") {
-            val body = call.receive<NewExpense>()
-            val saved = ExpenseRepository.add(body)
-            call.respond(saved)
-        }
-
-        // Удалить трату по id: DELETE /api/expenses/<id>.
-        // {id} в пути — переменная, её значение достаём через call.parameters["id"].
-        delete("/api/expenses/{id}") {
-            val idParam = call.parameters["id"]
-            // id должен быть корректным UUID; если нет — 400 (неверный запрос).
-            val uuid = runCatching { UUID.fromString(idParam) }.getOrNull()
-            if (uuid == null) {
-                call.respond(HttpStatusCode.BadRequest, "Некорректный id")
-                return@delete
+    // Токен для защиты API берём из переменной окружения API_TOKEN.
+    // Если он задан — все ручки /api/* требуют заголовок "Authorization: Bearer <token>".
+    // Если не задан (например, локальная разработка) — API открыт, но предупреждаем в лог.
+    val apiToken = System.getenv("API_TOKEN")?.trim().orEmpty()
+    val authEnabled = apiToken.isNotEmpty()
+    if (authEnabled) {
+        install(Authentication) {
+            // "api-auth" — имя нашей схемы проверки; bearer = токен в заголовке Authorization.
+            bearer("api-auth") {
+                authenticate { credential ->
+                    // Пришедший токен совпал с нашим? Пускаем (возвращаем "личность").
+                    // Иначе null → Ktor сам ответит 401 Unauthorized.
+                    if (credential.token == apiToken) UserIdPrincipal("api") else null
+                }
             }
-            val removed = ExpenseRepository.delete(uuid)
-            // 204 No Content — удалили; 404 — траты с таким id не было.
-            call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+        }
+    } else {
+        println("ВНИМАНИЕ: API_TOKEN не задан — REST API работает БЕЗ авторизации (ок для локали).")
+    }
+
+    routing {
+        // Ручки /api/* — под проверкой токена, если он задан; иначе открыто.
+        if (authEnabled) {
+            authenticate("api-auth") { apiRoutes() }
+        } else {
+            apiRoutes()
         }
 
-        // Проверка "жив ли сервер". Открой в браузере http://127.0.0.1:8080/health
+        // /health и веб-страница остаются открытыми: health — для мониторинга;
+        // "/" — это только HTML-каркас, а данные за ним всё равно защищены токеном.
         get("/health") {
             call.respond(HealthResponse(status = "ok"))
         }
-
-        // Веб-интерфейс: отдаём статические файлы из resources/static.
-        // Запрос "/" вернёт static/index.html — простую страницу с формой и списком трат.
         staticResources("/", "static")
+    }
+}
+
+/**
+ * REST-ручки для работы с тратами. Вынесены в отдельную функцию, чтобы подключать их
+ * и внутри authenticate { } (с проверкой токена), и без неё (локальная разработка).
+ */
+private fun Route.apiRoutes() {
+    // Список всех трат. Вся работа с базой — внутри ExpenseRepository.
+    get("/api/expenses") {
+        call.respond(ExpenseRepository.all())
+    }
+
+    // Добавить трату. Тело запроса (JSON) превращается в NewExpense,
+    // репозиторий кладёт его в базу и возвращает уже полноценную запись с id и временем.
+    post("/api/expenses") {
+        val body = call.receive<NewExpense>()
+        val saved = ExpenseRepository.add(body)
+        call.respond(saved)
+    }
+
+    // Удалить трату по id: DELETE /api/expenses/<id>.
+    // {id} в пути — переменная, её значение достаём через call.parameters["id"].
+    delete("/api/expenses/{id}") {
+        val idParam = call.parameters["id"]
+        // id должен быть корректным UUID; если нет — 400 (неверный запрос).
+        val uuid = runCatching { UUID.fromString(idParam) }.getOrNull()
+        if (uuid == null) {
+            call.respond(HttpStatusCode.BadRequest, "Некорректный id")
+            return@delete
+        }
+        val removed = ExpenseRepository.delete(uuid)
+        // 204 No Content — удалили; 404 — траты с таким id не было.
+        call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
     }
 }
 
