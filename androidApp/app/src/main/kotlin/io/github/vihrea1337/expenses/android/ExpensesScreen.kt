@@ -16,12 +16,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -60,6 +62,10 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
     var category by rememberSaveable { mutableStateOf("") }
     var amount by rememberSaveable { mutableStateOf("") }
     var periodIndex by rememberSaveable { mutableIntStateOf(2) } // по умолчанию "Месяц"
+    var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Расход за текущий календарный месяц — для сравнения с бюджетом.
+    val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
 
     // Траты за выбранный период; итог и разбивка считаются из них.
     val filtered = state.expenses.filter { inPeriod(it.createdAt, periodIndex) }
@@ -116,6 +122,24 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel()) {
             if (error != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(error, color = MaterialTheme.colorScheme.error)
+            }
+
+            // --- Бюджет на месяц ---
+            Spacer(Modifier.height(12.dp))
+            BudgetCard(
+                budget = state.monthlyBudget,
+                spent = monthSpent,
+                onEdit = { showBudgetDialog = true },
+            )
+            if (showBudgetDialog) {
+                BudgetDialog(
+                    current = state.monthlyBudget,
+                    onDismiss = { showBudgetDialog = false },
+                    onSave = { value ->
+                        viewModel.setBudget(value)
+                        showBudgetDialog = false
+                    },
+                )
             }
 
             // --- Переключатель периода ---
@@ -228,6 +252,96 @@ private fun CategoryBar(fraction: Float) {
     }
 }
 
+/** Карточка бюджета: лимит, потрачено за месяц, полоска и остаток/перерасход. */
+@Composable
+private fun BudgetCard(budget: Double?, spent: Double, onEdit: () -> Unit) {
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Бюджет на месяц",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onEdit) {
+                    Text(if (budget == null) "Задать" else "Изменить")
+                }
+            }
+            if (budget == null) {
+                Text(
+                    "Не задан. Нажми «Задать», чтобы установить лимит.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val left = budget - spent
+                val over = left < 0
+                Text("Потрачено ${formatAmount(spent)} из ${formatAmount(budget)} ₽")
+                Spacer(Modifier.height(6.dp))
+                BudgetBar(fraction = if (budget > 0) (spent / budget).toFloat() else 0f, over = over)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (over) "Перерасход: ${formatAmount(-left)} ₽" else "Осталось: ${formatAmount(left)} ₽",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** Полоска прогресса бюджета: зелёная в пределах лимита, красная при перерасходе. */
+@Composable
+private fun BudgetBar(fraction: Float, over: Boolean) {
+    val fill = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(fill),
+        )
+    }
+}
+
+/** Диалог ввода бюджета: «Сохранить» задаёт лимит, «Убрать» — сбрасывает. */
+@Composable
+private fun BudgetDialog(current: Double?, onDismiss: () -> Unit, onSave: (Double?) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(current?.let { formatAmount(it) } ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Бюджет на месяц") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Сумма в ₽") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val value = text.replace(',', '.').toDoubleOrNull()
+                onSave(if (value != null && value > 0) value else null)
+            }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(null) }) { Text("Убрать") }
+                TextButton(onClick = onDismiss) { Text("Отмена") }
+            }
+        },
+    )
+}
+
 /** Одна строка списка: слева категория и дата, справа сумма и кнопка удаления. */
 @Composable
 private fun ExpenseRow(expense: Expense, onDelete: () -> Unit) {
@@ -266,6 +380,13 @@ private fun inPeriod(createdAt: String, periodIndex: Int): Boolean {
         2 -> !date.isBefore(today.minusDays(29))
         else -> true
     }
+}
+
+/** Относится ли трата к текущему календарному месяцу (для бюджета). */
+private fun inCurrentMonth(createdAt: String): Boolean {
+    val date = runCatching { LocalDate.parse(createdAt.take(10)) }.getOrNull() ?: return false
+    val now = LocalDate.now()
+    return date.year == now.year && date.monthValue == now.monthValue
 }
 
 /** 200.0 -> "200", 149.5 -> "149.5" (убираем лишний ".0" у целых сумм). */

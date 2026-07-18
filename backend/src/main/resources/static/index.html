@@ -114,6 +114,8 @@
             <div class="error" id="error"></div>
         </div>
 
+        <div class="card" id="budget"></div>
+
         <div class="periods" id="periods">
             <button type="button" data-period="today">Сегодня</button>
             <button type="button" data-period="week">Неделя</button>
@@ -143,6 +145,7 @@
 
     let allData = [];            // все траты, как пришли с сервера
     let currentPeriod = 'month'; // выбранный период: today | week | month | all
+    let budgetValue = null;      // месячный бюджет (null — не задан)
 
     // --- Токен доступа хранится в localStorage этого браузера ---
     function getToken() { return localStorage.getItem('apiToken') || ''; }
@@ -209,6 +212,9 @@
             const data = await res.json();
             data.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
             allData = data;
+            const bRes = await apiFetch('/api/budget');
+            budgetValue = bRes.ok ? (await bRes.json()).monthlyBudget : null;
+            renderBudget();
             applyView();
         } catch (e) {
             if (e.message.includes('401')) return;
@@ -223,6 +229,54 @@
         renderTotal(data);
         renderBreakdown(data);
         renderList(data);
+    }
+
+    // Относится ли трата к текущему календарному месяцу (для бюджета).
+    function inCurrentMonth(iso) {
+        const d = new Date(iso);
+        if (isNaN(d)) return false;
+        const now = new Date();
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }
+
+    // Карточка бюджета: сколько потрачено за календарный месяц против лимита.
+    function renderBudget() {
+        const el = document.getElementById('budget');
+        const spent = allData.filter((e) => inCurrentMonth(e.createdAt)).reduce((s, e) => s + e.amount, 0);
+        if (budgetValue == null) {
+            el.innerHTML = `<div class="topbar"><span class="bd-title">Бюджет на месяц</span>
+                <button class="linkbtn" id="setBudget">Задать</button></div>
+                <div class="hint">Не задан. Нажми «Задать», чтобы установить лимит.</div>`;
+        } else {
+            const left = budgetValue - spent;
+            const over = left < 0;
+            const pct = budgetValue > 0 ? Math.min(100, Math.round(spent / budgetValue * 100)) : 0;
+            const barColor = over ? 'var(--danger)' : 'var(--accent)';
+            const leftText = over ? 'Перерасход: ' + money(-left) + ' ₽' : 'Осталось: ' + money(left) + ' ₽';
+            el.innerHTML = `<div class="topbar"><span class="bd-title">Бюджет на месяц</span>
+                <button class="linkbtn" id="setBudget">Изменить</button></div>
+                <div>Потрачено ${money(spent)} из ${money(budgetValue)} ₽</div>
+                <div class="bd-bar" style="margin:8px 0"><div style="width:${pct}%;background:${barColor}"></div></div>
+                <div style="color:${over ? 'var(--danger)' : 'var(--muted)'}">${leftText}</div>`;
+        }
+        document.getElementById('setBudget').addEventListener('click', editBudget);
+    }
+
+    async function editBudget() {
+        const cur = budgetValue == null ? '' : String(budgetValue);
+        const input = prompt('Бюджет на месяц (₽). Оставь пустым, чтобы убрать бюджет:', cur);
+        if (input === null) return; // нажали "Отмена"
+        const v = input.trim() === '' ? null : parseFloat(input.replace(',', '.'));
+        try {
+            await apiFetch('/api/budget', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ monthlyBudget: (v && v > 0) ? v : null }),
+            });
+            load();
+        } catch (e) {
+            if (!e.message.includes('401')) errorEl.textContent = 'Не удалось сохранить бюджет: ' + e.message;
+        }
     }
 
     function renderTotal(data) {

@@ -5,6 +5,7 @@ import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.upsert
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -63,5 +64,31 @@ object ExpenseRepository {
      */
     fun delete(id: UUID): Boolean = transaction {
         Expenses.deleteWhere { Expenses.id eq id } > 0
+    }
+
+    // Ключ настройки месячного бюджета в таблице Settings.
+    private const val BUDGET_KEY = "monthly_budget"
+
+    /** Прочитать месячный бюджет. null — если он не задан. */
+    fun getBudget(): Double? = transaction {
+        Settings.selectAll().where { Settings.key eq BUDGET_KEY }
+            .firstOrNull()
+            ?.get(Settings.value)
+            ?.toDoubleOrNull()
+    }
+
+    /**
+     * Задать месячный бюджет. Если значение null или ≤ 0 — считаем, что бюджет сброшен,
+     * и удаляем настройку. upsert = "вставить или обновить, если ключ уже есть".
+     */
+    fun setBudget(value: Double?) = transaction {
+        if (value == null || value <= 0) {
+            Settings.deleteWhere { Settings.key eq BUDGET_KEY }
+        } else {
+            Settings.upsert {
+                it[Settings.key] = BUDGET_KEY
+                it[Settings.value] = value.toString()
+            }
+        }
     }
 }

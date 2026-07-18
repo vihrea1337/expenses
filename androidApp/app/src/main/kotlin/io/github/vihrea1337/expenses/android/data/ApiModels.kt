@@ -25,3 +25,9 @@ data class NewExpense(
     val category: String,
     val note: String? = null,
 )
+
+/** Месячный бюджет. monthlyBudget = null означает "бюджет не задан". */
+@Serializable
+data class BudgetDto(
+    val monthlyBudget: Double? = null,
+)

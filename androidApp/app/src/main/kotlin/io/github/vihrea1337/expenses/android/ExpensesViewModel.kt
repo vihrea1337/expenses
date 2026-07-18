@@ -3,6 +3,7 @@ package io.github.vihrea1337.expenses.android
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.vihrea1337.expenses.android.data.ApiClient
+import io.github.vihrea1337.expenses.android.data.BudgetDto
 import io.github.vihrea1337.expenses.android.data.Expense
 import io.github.vihrea1337.expenses.android.data.NewExpense
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
  */
 data class ExpensesUiState(
     val expenses: List<Expense> = emptyList(),
+    val monthlyBudget: Double? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -43,13 +45,28 @@ class ExpensesViewModel : ViewModel() {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 val list = ApiClient.api.getExpenses()
+                val budget = ApiClient.api.getBudget().monthlyBudget
                 // Свежие траты — сверху (сортируем по времени создания по убыванию).
                 _state.update {
                     it.copy(
                         expenses = list.sortedByDescending { e -> e.createdAt },
+                        monthlyBudget = budget,
                         isLoading = false,
                     )
                 }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
+            }
+        }
+    }
+
+    /** Задать (value > 0) или сбросить (value = null) месячный бюджет. */
+    fun setBudget(value: Double?) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            try {
+                ApiClient.api.setBudget(BudgetDto(value))
+                refresh()
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
             }

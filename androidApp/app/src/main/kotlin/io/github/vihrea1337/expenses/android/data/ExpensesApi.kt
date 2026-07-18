@@ -11,6 +11,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 
 /**
@@ -32,6 +33,14 @@ interface ExpensesApi {
      */
     @DELETE("api/expenses/{id}")
     suspend fun deleteExpense(@Path("id") id: String): Response<Unit>
+
+    /** GET /api/budget — прочитать месячный бюджет (monthlyBudget = null, если не задан). */
+    @GET("api/budget")
+    suspend fun getBudget(): BudgetDto
+
+    /** PUT /api/budget — задать/сбросить месячный бюджет. */
+    @PUT("api/budget")
+    suspend fun setBudget(@Body body: BudgetDto): BudgetDto
 }
 
 /**

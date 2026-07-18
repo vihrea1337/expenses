@@ -147,7 +147,21 @@ private val dateFmt = DateTimeFormatter.ofPattern("dd.MM HH:mm")
  */
 private fun handleText(text: String): String {
     val trimmed = text.trim()
-    return when (trimmed.lowercase()) {
+    val lower = trimmed.lowercase()
+
+    // Бюджет: "/budget" или "бюджет" — показать статус; "бюджет 30000" — задать лимит.
+    if (lower == "/budget" || lower == "бюджет") return budgetStatusText()
+    if (lower.startsWith("бюджет ") || lower.startsWith("/budget ")) {
+        val value = trimmed.substringAfter(' ').trim().replace(',', '.').toDoubleOrNull()
+        return if (value != null && value > 0) {
+            ExpenseRepository.setBudget(value)
+            "✅ Бюджет на месяц: ${formatMoney(value)} ₽"
+        } else {
+            "Не понял сумму бюджета. Пример: бюджет 30000"
+        }
+    }
+
+    return when (lower) {
         "/start", "/help", "помощь", "старт" -> helpText()
         "/list", "список", "траты" -> listText()
         "/total", "итого", "сумма", "сколько" -> totalText()
@@ -176,6 +190,7 @@ private fun helpText(): String = """
     /list — последние траты
     /total — сколько потрачено
     /stats — траты по категориям
+    /budget — бюджет на месяц (задать: бюджет 30000)
     /help — эта справка
 """.trimIndent()
 
@@ -218,6 +233,34 @@ private fun statsText(): String {
         "• $category — ${formatMoney(sum)} ₽ ($percent%)"
     }
     return "Траты по категориям (всего ${formatMoney(total)} ₽):\n$lines"
+}
+
+/** Статус месячного бюджета: лимит, потрачено в этом месяце, остаток/перерасход. */
+private fun budgetStatusText(): String {
+    val budget = ExpenseRepository.getBudget()
+        ?: return "Бюджет на месяц не задан. Задай так: бюджет 30000"
+    val spent = currentMonthSpent()
+    val left = budget - spent
+    val tail = if (left >= 0) {
+        "Осталось: ${formatMoney(left)} ₽"
+    } else {
+        "Перерасход: ${formatMoney(-left)} ₽ ⚠️"
+    }
+    return "Бюджет на месяц: ${formatMoney(budget)} ₽\n" +
+        "Потрачено в этом месяце: ${formatMoney(spent)} ₽\n$tail"
+}
+
+/** Сумма трат за текущий календарный месяц (с 1-го числа). */
+private fun currentMonthSpent(): Double {
+    val now = LocalDate.now()
+    return ExpenseRepository.all()
+        .filter {
+            runCatching {
+                val d = LocalDate.parse(it.createdAt.take(10))
+                d.year == now.year && d.monthValue == now.monthValue
+            }.getOrDefault(false)
+        }
+        .sumOf { it.amount }
 }
 
 /** 200.0 -> "200", 149.5 -> "149.5" (убираем лишний ".0"). */

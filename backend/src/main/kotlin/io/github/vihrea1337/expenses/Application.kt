@@ -20,6 +20,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.Database
@@ -128,6 +129,18 @@ private fun Route.apiRoutes() {
         // 204 No Content — удалили; 404 — траты с таким id не было.
         call.respond(if (removed) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
     }
+
+    // Прочитать месячный бюджет. monthlyBudget = null, если не задан.
+    get("/api/budget") {
+        call.respond(BudgetDto(ExpenseRepository.getBudget()))
+    }
+
+    // Задать (или сбросить) месячный бюджет. В теле — { "monthlyBudget": 30000 } или null.
+    put("/api/budget") {
+        val body = call.receive<BudgetDto>()
+        ExpenseRepository.setBudget(body.monthlyBudget)
+        call.respond(BudgetDto(ExpenseRepository.getBudget()))
+    }
 }
 
 /**
@@ -167,7 +180,7 @@ fun configureDatabase() {
     //    (повторный запуск сервера ничего не сломает). transaction { } — обязательная обёртка:
     //    любые обращения к базе в Exposed выполняются внутри транзакции.
     transaction {
-        SchemaUtils.create(Expenses)
+        SchemaUtils.create(Expenses, Settings)
     }
 }
 
@@ -177,3 +190,9 @@ fun configureDatabase() {
  */
 @Serializable
 data class HealthResponse(val status: String)
+
+/**
+ * Месячный бюджет для обмена по JSON. monthlyBudget = null означает "бюджет не задан".
+ */
+@Serializable
+data class BudgetDto(val monthlyBudget: Double? = null)
