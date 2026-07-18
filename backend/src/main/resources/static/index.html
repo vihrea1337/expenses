@@ -53,8 +53,20 @@
             background: transparent; color: var(--muted); font-weight: 400;
             font-size: 13px; padding: 4px 8px;
         }
+        .periods { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .periods button {
+            flex: 1; background: var(--card); color: var(--text);
+            border: 1px solid var(--border); font-weight: 500; padding: 8px 10px;
+        }
+        .periods button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
         .total { font-size: 15px; color: var(--muted); margin: 4px 2px 12px; }
         .total b { color: var(--text); font-size: 18px; }
+        .bd-title { font-weight: 600; margin-bottom: 8px; }
+        .bd-row { padding: 8px 2px; }
+        .bd-head { display: flex; justify-content: space-between; font-size: 15px; margin-bottom: 4px; gap: 8px; }
+        .bd-head span:last-child { color: var(--muted); white-space: nowrap; }
+        .bd-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+        .bd-bar > div { height: 100%; background: var(--accent); }
         .row {
             display: flex; align-items: center; gap: 12px;
             padding: 12px 4px; border-bottom: 1px solid var(--border);
@@ -102,7 +114,16 @@
             <div class="error" id="error"></div>
         </div>
 
+        <div class="periods" id="periods">
+            <button type="button" data-period="today">Сегодня</button>
+            <button type="button" data-period="week">Неделя</button>
+            <button type="button" data-period="month" class="active">Месяц</button>
+            <button type="button" data-period="all">Всё</button>
+        </div>
+
         <div class="total" id="total"></div>
+
+        <div class="card hidden" id="breakdown"></div>
 
         <div class="card" id="list">
             <div class="empty">Загрузка…</div>
@@ -115,9 +136,13 @@
     const errorEl = document.getElementById('error');
     const listEl = document.getElementById('list');
     const totalEl = document.getElementById('total');
+    const breakdownEl = document.getElementById('breakdown');
     const loginCard = document.getElementById('loginCard');
     const appArea = document.getElementById('appArea');
     const loginError = document.getElementById('loginError');
+
+    let allData = [];            // все траты, как пришли с сервера
+    let currentPeriod = 'month'; // выбранный период: today | week | month | all
 
     // --- Токен доступа хранится в localStorage этого браузера ---
     function getToken() { return localStorage.getItem('apiToken') || ''; }
@@ -161,6 +186,21 @@
         return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
+    // Начало сегодняшнего дня (00:00) — от него отсчитываем периоды.
+    function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+
+    // Попадает ли трата в выбранный период. Неделя = последние 7 дней, месяц = последние 30 дней.
+    function inPeriod(iso) {
+        if (currentPeriod === 'all') return true;
+        const d = new Date(iso);
+        if (isNaN(d)) return true;
+        const today0 = startOfToday();
+        if (currentPeriod === 'today') return d >= today0;
+        const start = new Date(today0);
+        start.setDate(start.getDate() - (currentPeriod === 'week' ? 6 : 29));
+        return d >= start;
+    }
+
     async function load() {
         errorEl.textContent = '';
         try {
@@ -168,20 +208,48 @@
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             data.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-            render(data);
+            allData = data;
+            applyView();
         } catch (e) {
-            if (e.message.includes('401')) return; // уже показали экран входа
+            if (e.message.includes('401')) return;
             listEl.innerHTML = '<div class="empty">Не удалось загрузить траты</div>';
             errorEl.textContent = 'Ошибка сети: ' + e.message;
         }
     }
 
-    function render(data) {
-        const sum = data.reduce((s, e) => s + e.amount, 0);
-        totalEl.innerHTML = `Всего: <b>${money(sum)} ₽</b> · ${data.length} трат`;
+    // Пересчитать и перерисовать всё под выбранный период.
+    function applyView() {
+        const data = allData.filter((e) => inPeriod(e.createdAt));
+        renderTotal(data);
+        renderBreakdown(data);
+        renderList(data);
+    }
 
+    function renderTotal(data) {
+        const sum = data.reduce((s, e) => s + e.amount, 0);
+        totalEl.innerHTML = `Всего за период: <b>${money(sum)} ₽</b> · ${data.length} трат`;
+    }
+
+    // Разбивка по категориям: топ-8 с суммой, долей и полоской.
+    function renderBreakdown(data) {
+        if (data.length === 0) { breakdownEl.classList.add('hidden'); return; }
+        breakdownEl.classList.remove('hidden');
+        const total = data.reduce((s, e) => s + e.amount, 0);
+        const map = {};
+        data.forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
+        const rows = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        breakdownEl.innerHTML = '<div class="bd-title">По категориям</div>' + rows.map(([cat, sum]) => {
+            const pct = total > 0 ? Math.round(sum / total * 100) : 0;
+            return `<div class="bd-row">
+                <div class="bd-head"><span>${escapeHtml(cat)}</span><span>${money(sum)} ₽ · ${pct}%</span></div>
+                <div class="bd-bar"><div style="width:${pct}%"></div></div>
+            </div>`;
+        }).join('');
+    }
+
+    function renderList(data) {
         if (data.length === 0) {
-            listEl.innerHTML = '<div class="empty">Пока трат нет. Добавь первую!</div>';
+            listEl.innerHTML = '<div class="empty">За этот период трат нет.</div>';
             return;
         }
         listEl.innerHTML = data.map((e) => `
@@ -216,7 +284,15 @@
         }
     }
 
-    // --- Обработчики форм ---
+    // --- Обработчики ---
+    document.querySelectorAll('#periods button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            currentPeriod = btn.dataset.period;
+            document.querySelectorAll('#periods button').forEach((b) => b.classList.toggle('active', b === btn));
+            applyView();
+        });
+    });
+
     document.getElementById('loginForm').addEventListener('submit', (ev) => {
         ev.preventDefault();
         const t = document.getElementById('token').value.trim();
@@ -263,7 +339,7 @@
         }
     });
 
-    // При открытии страницы: если токен уже сохранён — показываем приложение, иначе — вход.
+    // При открытии: если токен уже сохранён — показываем приложение, иначе — вход.
     if (getToken()) {
         showApp();
         load();

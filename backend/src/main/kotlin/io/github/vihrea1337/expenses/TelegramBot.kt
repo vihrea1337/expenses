@@ -151,6 +151,7 @@ private fun handleText(text: String): String {
         "/start", "/help", "помощь", "старт" -> helpText()
         "/list", "список", "траты" -> listText()
         "/total", "итого", "сумма", "сколько" -> totalText()
+        "/stats", "статистика", "категории" -> statsText()
         else -> {
             val new = parseExpense(trimmed)
             if (new == null) {
@@ -174,6 +175,7 @@ private fun helpText(): String = """
     Команды:
     /list — последние траты
     /total — сколько потрачено
+    /stats — траты по категориям
     /help — эта справка
 """.trimIndent()
 
@@ -199,6 +201,23 @@ private fun totalText(): String {
         .filter { runCatching { LocalDate.parse(it.createdAt.take(10)) == today }.getOrDefault(false) }
         .sumOf { it.amount }
     return "Всего: ${formatMoney(total)} ₽ за ${all.size} трат.\nСегодня: ${formatMoney(todayTotal)} ₽"
+}
+
+/** Разбивка трат по категориям (топ-10) с суммой и долей в процентах. */
+private fun statsText(): String {
+    val all = ExpenseRepository.all()
+    if (all.isEmpty()) return "Пока трат нет. Напиши, например: кофе 200"
+    val total = all.sumOf { it.amount }
+    val byCategory = all
+        .groupBy { it.category }
+        .map { (category, list) -> category to list.sumOf { it.amount } }
+        .sortedByDescending { it.second }
+        .take(10)
+    val lines = byCategory.joinToString("\n") { (category, sum) ->
+        val percent = if (total > 0) Math.round(sum / total * 100) else 0
+        "• $category — ${formatMoney(sum)} ₽ ($percent%)"
+    }
+    return "Траты по категориям (всего ${formatMoney(total)} ₽):\n$lines"
 }
 
 /** 200.0 -> "200", 149.5 -> "149.5" (убираем лишний ".0"). */
