@@ -60,7 +60,10 @@ dependencies {
     implementation("io.ktor:ktor-client-cio")                  // движок: кто реально шлёт запросы по сети
     implementation("io.ktor:ktor-client-content-negotiation")  // разбирать JSON-ответы Telegram в наши классы
 
-    // Для будущих тестов сервера (поднимают Ktor без реального порта).
+    // Для тестов сервера (поднимают Ktor без реального порта).
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation(kotlin("test"))
+    // H2 — встроенная база «в памяти»: репозитории тестируем на настоящем SQL,
+    // но без Postgres и Docker (база живёт только на время теста).
+    testImplementation("com.h2database:h2:2.2.224")
 }
