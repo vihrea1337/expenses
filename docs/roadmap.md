@@ -66,7 +66,7 @@ cd C:\Users\main\Desktop\GitArea\Expenses\backend
 ## Бэклог — по желанию — ⬜
 - ⬜ **Webhook** вместо long-polling (эффективнее; требует правки nginx на VPS).
 - ⬜ **Офлайн-first** в приложении (Room) + синхронизация.
-- ⬜ **Бэкапы БД** (pg_dump по расписанию на VPS).
+- 🟨 **Бэкапы БД** — инструкция и cron-скрипт готовы ([backup.md](backup.md)); осталось включить на VPS.
 - ⬜ Идемпотентность (UUID на клиенте), общий Kotlin-модуль моделей, hover на секторах диаграммы.
 
 Приоритеты и обоснования — [architecture.md §8](architecture.md).
