@@ -4,6 +4,7 @@ import io.github.vihrea1337.expenses.android.TokenStore
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -53,6 +54,10 @@ interface ExpensesApi {
     /** GET /api/me — проверить токен и узнать имя текущего пользователя. */
     @GET("api/me")
     suspend fun me(): MeResponse
+
+    /** GET /api/expenses.csv — выгрузка всех трат в CSV. ResponseBody — сырые байты файла. */
+    @GET("api/expenses.csv")
+    suspend fun exportCsv(): ResponseBody
 }
 
 /**

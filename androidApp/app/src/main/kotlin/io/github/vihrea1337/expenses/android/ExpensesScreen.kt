@@ -1,5 +1,7 @@
 package io.github.vihrea1337.expenses.android
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,6 +60,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -89,6 +92,19 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> U
     var showAddSheet by rememberSaveable { mutableStateOf(false) }     // открыта ли форма добавления
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Expense?>(null) }         // редактируемая трата
+
+    // Экспорт в CSV: системный диалог «создать документ» даёт uri выбранного файла,
+    // в колбэке качаем траты и записываем байты в этот файл (через ContentResolver).
+    val context = LocalContext.current
+    val csvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportCsv { bytes ->
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
+            }
+        }
+    }
 
     // Производные данные под выбранный период.
     val filtered = state.expenses.filter { inPeriod(it.createdAt, periodIndex) }
@@ -179,6 +195,7 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> U
                     onRefresh = { viewModel.refresh() },
                     onEdit = { editing = it },
                     onDelete = { viewModel.deleteExpense(it) },
+                    onExport = { csvLauncher.launch("expenses.csv") },
                 )
             }
         }
@@ -254,16 +271,21 @@ private fun ListTab(
     onRefresh: () -> Unit,
     onEdit: (Expense) -> Unit,
     onDelete: (String) -> Unit,
+    onExport: () -> Unit,
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        Text(
-            "Всего за период: ${formatAmount(total)} ₽ · ${expenses.size} трат",
-            style = MaterialTheme.typography.titleMedium,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Всего за период: ${formatAmount(total)} ₽ · ${expenses.size} трат",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onExport) { Text("⭳ CSV") }
+        }
         Spacer(Modifier.height(8.dp))
         HorizontalDivider()
         PullToRefreshBox(

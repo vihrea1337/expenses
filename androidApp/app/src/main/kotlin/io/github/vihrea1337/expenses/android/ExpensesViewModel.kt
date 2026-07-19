@@ -135,6 +135,24 @@ class ExpensesViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Скачать все траты в CSV. Сеть — в фоне (корутина), затем onReady отдаёт готовые байты
+     * экрану, который записывает их в выбранный пользователем файл. Так ViewModel не зависит
+     * от Context/файловой системы (это забота экрана).
+     */
+    fun exportCsv(onReady: (ByteArray) -> Unit) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, error = null) }
+            try {
+                val bytes = ApiClient.api.exportCsv().bytes()
+                _state.update { it.copy(isLoading = false) }
+                onReady(bytes)
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка экспорта") }
+            }
+        }
+    }
+
     /** Удалить трату по id и обновить список. */
     fun deleteExpense(id: String) {
         viewModelScope.launch {

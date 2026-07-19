@@ -150,6 +150,10 @@
 
         <div class="total" id="total"></div>
 
+        <div style="text-align:right;margin:-6px 2px 12px">
+            <button id="csvBtn" class="linkbtn" type="button">⭳ Скачать CSV</button>
+        </div>
+
         <div class="card hidden" id="breakdown"></div>
 
         <div class="card hidden" id="trend"></div>
@@ -379,6 +383,26 @@
         document.getElementById('reclassifyBtn').addEventListener('click', reclassify);
     }
 
+    // Скачать все траты в CSV. Токен нужен в заголовке, поэтому качаем через fetch и сохраняем
+    // как файл через временную ссылку (обычный <a href> заголовок Authorization не отправит).
+    async function downloadCsv() {
+        try {
+            const res = await apiFetch('/api/expenses.csv');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'expenses.csv';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            if (!e.message.includes('401')) errorEl.textContent = 'Не удалось скачать CSV: ' + e.message;
+        }
+    }
+
     // Попросить сервер проставить категории тратам, у которых их ещё нет (через ИИ).
     async function reclassify() {
         try {
@@ -576,6 +600,8 @@
         setToken('');
         showLogin();
     });
+
+    document.getElementById('csvBtn').addEventListener('click', downloadCsv);
 
     document.getElementById('addForm').addEventListener('submit', async (ev) => {
         ev.preventDefault();
