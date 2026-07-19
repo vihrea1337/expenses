@@ -42,7 +42,12 @@ import java.util.UUID
 fun main() {
     configureDatabase() // подключиться к базе, создать таблицы, мигрировать старые данные
     startBot()          // Telegram-бот в фоне (если есть токен)
-    embeddedServer(Netty, port = 8080, host = "127.0.0.1") {
+    // Порт и хост можно переопределить переменными окружения. В Docker внутри контейнера
+    // надо слушать 0.0.0.0 (иначе проброс порта не достучится); по умолчанию — как раньше,
+    // локально на 127.0.0.1:8080.
+    val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
+    val host = System.getenv("HOST") ?: "127.0.0.1"
+    embeddedServer(Netty, port = port, host = host) {
         module()
     }.start(wait = true)
 }
