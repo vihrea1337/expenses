@@ -64,9 +64,10 @@ interface ExpensesApi {
  * Единая точка создания клиента Retrofit. by lazy — создаём его один раз при первом обращении.
  */
 object ApiClient {
-    // Адрес нашего бэкенда на VPS. Должен оканчиваться на "/".
-    // Если позже переедем на другой адрес — меняем только эту строку.
-    private const val BASE_URL = "https://sashlevhealth.duckdns.org/"
+    // Адрес нашего бэкенда. Должен оканчиваться на "/".
+    // Порт 34443 — потому что на новом сервере Caddy отдаёт HTTPS на этом порту
+    // (80/443 там заняты). Если переедем — меняем только эту строку.
+    private const val BASE_URL = "https://sashlevhealth.duckdns.org:34443/"
 
     val api: ExpensesApi by lazy {
         // ignoreUnknownKeys = true — если сервер пришлёт лишние поля, не падаем.

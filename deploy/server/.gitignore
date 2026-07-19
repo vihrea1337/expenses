@@ -1,0 +1,6 @@
+# Секреты и данные — НЕ в git.
+.env
+expenses.env
+expenses-db.sql
+backend/expenses-backend-all.jar
+*.jar

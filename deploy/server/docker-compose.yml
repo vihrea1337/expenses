@@ -1,0 +1,54 @@
+# Expenses на сервере (в /root/app). Три контейнера в своей сети; наружу торчит
+# ТОЛЬКО Caddy на порту 34443 (HTTPS). Стек брата не затрагиваем.
+#
+# Порядок запуска и восстановления данных — см. README.md рядом.
+services:
+  expenses-pg:
+    image: postgres:16
+    container_name: expenses-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: expenses
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [expenses-net]
+
+  expenses-backend:
+    build: ./backend            # backend/Dockerfile + рядом expenses-backend-all.jar
+    container_name: expenses-backend
+    restart: unless-stopped
+    depends_on: [expenses-pg]
+    env_file:
+      - ./expenses.env          # секреты: BOT_TOKEN, API_TOKEN, GROQ_API_KEY
+    environment:                # БД и хост/порт задаём здесь (перекрывают env_file)
+      HOST: 0.0.0.0
+      PORT: "8080"
+      DB_URL: jdbc:postgresql://expenses-pg:5432/expenses
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+    networks: [expenses-net]
+
+  caddy:
+    build: ./caddy              # Caddy со встроенным модулем DuckDNS
+    container_name: expenses-caddy
+    restart: unless-stopped
+    depends_on: [expenses-backend]
+    ports:
+      - "34443:34443"
+    environment:
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [expenses-net]
+
+networks:
+  expenses-net:
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
