@@ -164,7 +164,7 @@ private fun Route.apiRoutes() {
  * Собрать CSV из списка трат. Разделитель — «;» (так русский Excel открывает файл сразу по столбцам).
  * В начало добавляем BOM (﻿), иначе Excel на Windows покажет кириллицу «кракозябрами».
  */
-private fun buildCsv(rows: List<Expense>): String {
+internal fun buildCsv(rows: List<Expense>): String {
     val sb = StringBuilder()
     sb.append('﻿') // BOM — метка кодировки UTF-8 для Excel
     sb.append("Дата;Категория;Сумма;Категория ИИ;Заметка\r\n")
