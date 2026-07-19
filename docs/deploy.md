@@ -48,3 +48,41 @@
 3. Проверять и **синтаксис, и структуру**: `docker exec nginx-proxy nginx -t` (синтаксис) + `grep -nE 'stream \{|http \{|server_name' nginx.conf` (что http-блок и все server_name на месте — `nginx -t` проходит даже без http-блока!).
 4. Применить: `docker exec nginx-proxy nginx -s reload` (мягкий, соединения не рвёт; при ошибке не применяется).
 5. Проверить: `curl -s https://sashlevhealth.duckdns.org/health` и что сайт отдаёт 200.
+
+## Перенос на новый сервер (с нуля)
+
+Готовые артефакты — в папке [`deploy/`](../deploy):
+
+| Файл | Назначение |
+|---|---|
+| `deploy/expenses.env.example` | шаблон секретов → `/etc/expenses/expenses.env` |
+| `deploy/expenses-backend.service` | systemd-юнит (с `EnvironmentFile`) → `/etc/systemd/system/` |
+| `deploy/nginx-expenses.conf` | server-блок nginx (справочно; на бою он в `vpn-stack`) |
+
+Нужны также (в зашифрованном бэкапе, **не в git**): `expenses.env` с реальными значениями и
+дамп БД `expenses-db.sql` (`pg_dump -U postgres expenses`).
+
+Шаги на чистом сервере:
+```bash
+# 1) PostgreSQL в docker (пароль = DB_PASSWORD из expenses.env)
+docker run -d --name expenses-pg --restart unless-stopped \
+  -e POSTGRES_PASSWORD=<пароль> -e POSTGRES_DB=expenses \
+  -p 127.0.0.1:5432:5432 -v expenses_pgdata:/var/lib/postgresql/data postgres:16
+
+# 2) Восстановить данные из дампа
+cat expenses-db.sql | docker exec -i expenses-pg psql -U postgres expenses
+
+# 3) Секреты, jar, служба
+mkdir -p /etc/expenses /opt/expenses
+cp expenses.env /etc/expenses/ && chmod 600 /etc/expenses/expenses.env
+cp expenses-backend-all.jar /opt/expenses/      # собрать: ./gradlew buildFatJar
+apt-get install -y openjdk-21-jre-headless
+id expenses &>/dev/null || useradd -r -s /usr/sbin/nologin expenses
+chown -R expenses:expenses /opt/expenses
+cp deploy/expenses-backend.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now expenses-backend
+curl -s http://127.0.0.1:8080/health            # {"status":"ok"}
+```
+
+Reverse-proxy (nginx-блок `sashlevhealth`) и выпуск сертификата — часть общего сервера,
+см. полный чек-лист **[`vihrea1337/vpn-stack` → RESTORE-SERVER.md](https://github.com/vihrea1337/vpn-stack/blob/master/RESTORE-SERVER.md)**.

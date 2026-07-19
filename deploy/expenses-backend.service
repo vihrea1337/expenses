@@ -1,0 +1,16 @@
+[Unit]
+Description=Expenses backend (Ktor)
+After=network.target
+
+[Service]
+Type=simple
+User=expenses
+WorkingDirectory=/opt/expenses
+# Секреты (пароль БД, токены) — из /etc/expenses/expenses.env (chmod 600).
+EnvironmentFile=/etc/expenses/expenses.env
+ExecStart=/usr/bin/java -jar /opt/expenses/expenses-backend-all.jar
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
