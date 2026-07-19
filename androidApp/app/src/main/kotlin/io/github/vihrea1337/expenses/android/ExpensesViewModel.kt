@@ -79,7 +79,7 @@ class ExpensesViewModel : ViewModel() {
      * Добавить трату. category — категория, amountText — сумма как её ввёл пользователь (строка).
      * onSuccess вызовется после успешной отправки (экран очистит поля ввода).
      */
-    fun addExpense(category: String, amountText: String, onSuccess: () -> Unit) {
+    fun addExpense(category: String, amountText: String, note: String?, onSuccess: () -> Unit) {
         // Запятую тоже принимаем как разделитель дробной части (150,5 -> 150.5).
         val amount = amountText.replace(',', '.').toDoubleOrNull()
         if (category.isBlank() || amount == null || amount <= 0) {
@@ -90,7 +90,8 @@ class ExpensesViewModel : ViewModel() {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 ApiClient.api.addExpense(
-                    NewExpense(amount = amount, category = category.trim(), note = null),
+                    // Пустую заметку не отправляем (шлём null, а не "").
+                    NewExpense(amount = amount, category = category.trim(), note = note?.trim()?.ifBlank { null }),
                 )
                 onSuccess()
                 refresh()     // сразу обновляем список, чтобы увидеть новую трату
@@ -105,7 +106,7 @@ class ExpensesViewModel : ViewModel() {
      * Отредактировать трату. group = null — категорию переопределит ИИ; иначе ручная правка.
      * onSuccess закроет диалог.
      */
-    fun editExpense(id: String, category: String, amountText: String, group: String?, onSuccess: () -> Unit) {
+    fun editExpense(id: String, category: String, amountText: String, note: String?, group: String?, onSuccess: () -> Unit) {
         val amount = amountText.replace(',', '.').toDoubleOrNull()
         if (category.isBlank() || amount == null || amount <= 0) {
             _state.update { it.copy(error = "Введите категорию и сумму больше нуля") }
@@ -114,7 +115,7 @@ class ExpensesViewModel : ViewModel() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                ApiClient.api.editExpense(id, UpdateExpense(amount, category.trim(), null, group))
+                ApiClient.api.editExpense(id, UpdateExpense(amount, category.trim(), note?.trim()?.ifBlank { null }, group))
                 onSuccess()
                 refresh()
                 if (group == null) refreshSoon() // авто-категория проставится в фоне — подтянем позже

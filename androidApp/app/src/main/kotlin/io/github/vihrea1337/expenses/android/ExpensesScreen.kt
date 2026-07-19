@@ -216,8 +216,8 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> U
             EditExpenseDialog(
                 expense = editingExpense,
                 onDismiss = { editing = null },
-                onSave = { cat, amt, group ->
-                    viewModel.editExpense(editingExpense.id, cat, amt, group) { editing = null }
+                onSave = { cat, amt, note, group ->
+                    viewModel.editExpense(editingExpense.id, cat, amt, note, group) { editing = null }
                 },
             )
         }
@@ -362,6 +362,7 @@ private fun AnalyticsTab(
 private fun AddExpenseSheet(viewModel: ExpensesViewModel, error: String?, onDone: () -> Unit) {
     var category by rememberSaveable { mutableStateOf("") }
     var amount by rememberSaveable { mutableStateOf("") }
+    var note by rememberSaveable { mutableStateOf("") }
     Column(
         Modifier
             .fillMaxWidth()
@@ -386,13 +387,21 @@ private fun AddExpenseSheet(viewModel: ExpensesViewModel, error: String?, onDone
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = note,
+            onValueChange = { note = it },
+            label = { Text("Заметка (необязательно)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (error != null) {
             Spacer(Modifier.height(8.dp))
             Text(error, color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(12.dp))
         Button(
-            onClick = { viewModel.addExpense(category, amount) { onDone() } },
+            onClick = { viewModel.addExpense(category, amount, note) { onDone() } },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Добавить трату")
@@ -652,11 +661,12 @@ private fun BudgetDialog(current: Double?, onDismiss: () -> Unit, onSave: (Doubl
 private fun EditExpenseDialog(
     expense: Expense,
     onDismiss: () -> Unit,
-    onSave: (category: String, amount: String, group: String?) -> Unit,
+    onSave: (category: String, amount: String, note: String?, group: String?) -> Unit,
 ) {
     // remember(expense.id) — поля сбрасываются, если открыли правку другой траты.
     var category by remember(expense.id) { mutableStateOf(expense.category) }
     var amount by remember(expense.id) { mutableStateOf(formatAmount(expense.amount)) }
+    var note by remember(expense.id) { mutableStateOf(expense.note ?: "") }
     var group by remember(expense.id) { mutableStateOf(expense.categoryGroup ?: "авто") }
     var menuOpen by remember { mutableStateOf(false) }
     val groups = listOf(
@@ -686,6 +696,14 @@ private fun EditExpenseDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Заметка (необязательно)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
                 Box {
                     TextButton(onClick = { menuOpen = true }) { Text("Категория ИИ: $group ▾") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -697,7 +715,7 @@ private fun EditExpenseDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(category, amount, if (group == "авто") null else group) }) {
+            TextButton(onClick = { onSave(category, amount, note, if (group == "авто") null else group) }) {
                 Text("Сохранить")
             }
         },
@@ -718,9 +736,10 @@ private fun ExpenseRow(expense: Expense, onEdit: () -> Unit, onDelete: () -> Uni
     ) {
         Column(Modifier.weight(1f)) {
             Text(expense.category, style = MaterialTheme.typography.bodyLarge)
-            // Дата, а рядом обобщённая категория от ИИ (если уже проставлена).
+            // Дата, рядом обобщённая категория от ИИ (если проставлена) и заметка (если есть).
             val subtitle = expense.createdAt.take(16).replace('T', ' ') +
-                (expense.categoryGroup?.let { " · $it" } ?: "")
+                (expense.categoryGroup?.let { " · $it" } ?: "") +
+                (expense.note?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
