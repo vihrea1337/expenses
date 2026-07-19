@@ -93,13 +93,26 @@
         }
         .empty { color: var(--muted); text-align: center; padding: 24px 0; }
         .error { color: var(--danger); margin: 8px 2px; min-height: 18px; }
+        .who { color: var(--muted); font-size: 13px; margin-top: 2px; }
+        /* График «по времени»: одна серия столбиков одного акцентного цвета. */
+        .trend-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; margin-top: 8px; }
+        .tbar { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+        .tbar-fill { width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; }
+        .trend-labels { display: flex; gap: 2px; margin-top: 4px; }
+        .trend-labels span {
+            flex: 1; text-align: center; font-size: 11px; color: var(--muted);
+            white-space: nowrap; overflow: hidden;
+        }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 <div class="wrap">
     <div class="topbar">
-        <h1>💸 Мои траты</h1>
+        <div>
+            <h1>💸 Мои траты</h1>
+            <div class="who hidden" id="who"></div>
+        </div>
         <button id="logoutBtn" class="linkbtn hidden" type="button">Сменить токен</button>
     </div>
 
@@ -139,6 +152,8 @@
 
         <div class="card hidden" id="breakdown"></div>
 
+        <div class="card hidden" id="trend"></div>
+
         <div class="card" id="list">
             <div class="empty">Загрузка…</div>
         </div>
@@ -171,11 +186,27 @@
         loginCard.classList.remove('hidden');
         appArea.classList.add('hidden');
         document.getElementById('logoutBtn').classList.add('hidden');
+        document.getElementById('who').classList.add('hidden');
     }
     function showApp() {
         loginCard.classList.add('hidden');
         appArea.classList.remove('hidden');
         document.getElementById('logoutBtn').classList.remove('hidden');
+        loadMe(); // подтянуть имя вошедшего пользователя в шапку
+    }
+
+    // Узнать имя текущего пользователя (/api/me) и показать его под заголовком.
+    async function loadMe() {
+        const el = document.getElementById('who');
+        try {
+            const res = await apiFetch('/api/me');
+            if (!res.ok) { el.classList.add('hidden'); return; }
+            const me = await res.json();
+            el.textContent = 'Вошёл как: ' + me.name;
+            el.classList.remove('hidden');
+        } catch (e) {
+            el.classList.add('hidden'); // 401 обработает apiFetch (покажет вход)
+        }
     }
 
     // Обёртка над fetch: добавляет токен в заголовок и обрабатывает 401 (неверный токен).
@@ -252,6 +283,7 @@
         const data = allData.filter((e) => inPeriod(e.createdAt));
         renderTotal(data);
         renderBreakdown(data);
+        renderTrend(data);
         renderList(data);
     }
 
@@ -357,6 +389,80 @@
         } catch (e) {
             if (!e.message.includes('401')) errorEl.textContent = 'Не удалось запустить: ' + e.message;
         }
+    }
+
+    // Разбить траты периода на столбики по времени: неделя/месяц — по дням, «Всё» — по месяцам.
+    // «Сегодня» — один день, тренда нет → пустой список (график скрыт).
+    function buildTrend(data) {
+        if (currentPeriod === 'today') return [];
+        const dated = data
+            .map((e) => ({ d: new Date(e.createdAt), amt: e.amount }))
+            .filter((x) => !isNaN(x.d));
+        if (dated.length === 0) return [];
+        const today0 = startOfToday();
+
+        if (currentPeriod === 'all') {
+            // По календарным месяцам, от первого месяца с тратами до текущего.
+            const map = {};
+            let min = dated[0].d;
+            dated.forEach((x) => {
+                if (x.d < min) min = x.d;
+                const key = x.d.getFullYear() + '-' + x.d.getMonth();
+                map[key] = (map[key] || 0) + x.amt;
+            });
+            const bars = [];
+            let y = min.getFullYear(), m = min.getMonth();
+            const endY = today0.getFullYear(), endM = today0.getMonth();
+            while (y < endY || (y === endY && m <= endM)) {
+                const label = String(m + 1).padStart(2, '0') + '.' + String(y % 100).padStart(2, '0');
+                bars.push({ label, amount: map[y + '-' + m] || 0 });
+                m++; if (m > 11) { m = 0; y++; }
+            }
+            return bars;
+        }
+
+        // Неделя/месяц — непрерывный ряд последних 7 или 30 дней (пустые дни = 0).
+        const days = currentPeriod === 'week' ? 7 : 30;
+        const start = new Date(today0);
+        start.setDate(start.getDate() - (days - 1));
+        const map = {};
+        dated.forEach((x) => {
+            const day = new Date(x.d); day.setHours(0, 0, 0, 0);
+            if (day >= start) map[day.getTime()] = (map[day.getTime()] || 0) + x.amt;
+        });
+        const bars = [];
+        for (let i = 0; i < days; i++) {
+            const day = new Date(start);
+            day.setDate(day.getDate() + i);
+            bars.push({ label: String(day.getDate()), amount: map[day.getTime()] || 0 });
+        }
+        return bars;
+    }
+
+    // График трат по времени: столбики (одна серия, один акцентный цвет; заголовок называет серию).
+    function renderTrend(data) {
+        const el = document.getElementById('trend');
+        const bars = buildTrend(data);
+        if (bars.length === 0) { el.classList.add('hidden'); return; }
+        el.classList.remove('hidden');
+        const max = Math.max.apply(null, bars.map((b) => b.amount).concat([1]));
+        const peak = bars.reduce((a, b) => (b.amount > a.amount ? b : a), bars[0]);
+        const step = Math.max(1, Math.ceil(bars.length / 8)); // подписи не для каждого столбика
+
+        const barsHtml = bars.map((b) => {
+            const h = Math.round(b.amount / max * 100);
+            return `<div class="tbar" title="${escapeHtml(b.label)}: ${money(b.amount)} ₽">
+                <div class="tbar-fill" style="height:${h}%"></div></div>`;
+        }).join('');
+        const labelsHtml = bars.map((b, i) =>
+            `<span>${i % step === 0 ? escapeHtml(b.label) : ''}</span>`).join('');
+        const peakText = peak && peak.amount > 0
+            ? `Пик: ${money(peak.amount)} ₽ (${escapeHtml(peak.label)})` : '';
+
+        el.innerHTML = `<div class="bd-title">По времени</div>
+            <div class="hint" style="margin-top:0">${peakText}</div>
+            <div class="trend-bars">${barsHtml}</div>
+            <div class="trend-labels">${labelsHtml}</div>`;
     }
 
     function renderList(data) {

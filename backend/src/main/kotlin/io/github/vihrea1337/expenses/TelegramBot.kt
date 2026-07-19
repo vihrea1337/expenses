@@ -64,6 +64,14 @@ data class InlineKeyboardButton(val text: String, @SerialName("callback_data") v
 @Serializable
 data class InlineKeyboardMarkup(@SerialName("inline_keyboard") val inlineKeyboard: List<List<InlineKeyboardButton>>)
 
+/**
+ * Описание команды бота для setMyCommands. Отправив этот список Telegram один раз при старте,
+ * мы получаем встроенное меню команд: пользователь жмёт «/» — и видит подсказки со списком.
+ * command — имя без ведущего "/" (только строчные буквы/цифры/подчёркивание), description — пояснение.
+ */
+@Serializable
+data class BotCommand(val command: String, val description: String)
+
 /** Прочитать токен из secrets.properties (ключ bot.token). Нет файла/ключа — вернёт null. */
 private fun readTokenFromFile(): String? {
     val file = File("secrets.properties")
@@ -116,6 +124,8 @@ private suspend fun botLoop(token: String) {
     }
 
     val base = "https://api.telegram.org/bot$token"
+    // Разово регистрируем меню команд (кнопка «/» в Telegram покажет подсказки).
+    setBotCommands(client, base)
     // offset — "с какого сообщения продолжать". Указываем последний_update_id + 1, и Telegram
     // больше не присылает уже обработанные сообщения.
     var offset = 0L
@@ -152,8 +162,8 @@ private suspend fun botLoop(token: String) {
                 val user = UserRepository.findOrCreateByTelegram(message.chat.id, message.chat.firstName ?: "Пользователь")
                 val lower = text.trim().lowercase()
                 if (lower == "/start" || lower == "/menu" || lower == "меню") {
-                    // Показываем меню с кнопками.
-                    sendMenu(client, base, message.chat.id, "Что показать?", mainMenu())
+                    // Показываем меню с кнопками (с приветствием по имени аккаунта).
+                    sendMenu(client, base, message.chat.id, "${user.displayName}, что показать?", mainMenu())
                 } else {
                     sendMessage(client, base, message.chat.id, handleText(user, text))
                 }
@@ -221,6 +231,31 @@ private suspend fun answerCallback(client: HttpClient, base: String, callbackId:
     client.get("$base/answerCallbackQuery") {
         parameter("callback_query_id", callbackId)
     }
+}
+
+/**
+ * Зарегистрировать список команд бота (setMyCommands). После этого в Telegram появляется
+ * меню: пользователь нажимает «/» — и видит подсказки со всеми командами и их описанием.
+ * Достаточно вызвать один раз при старте; Telegram запоминает список на своей стороне.
+ * Ошибку молча гасим (runCatching) — если не удалось, бот всё равно работает как раньше.
+ */
+private suspend fun setBotCommands(client: HttpClient, base: String) {
+    val commands = listOf(
+        BotCommand("menu", "Кнопки: список, итого, категории, бюджет"),
+        BotCommand("list", "Последние траты"),
+        BotCommand("total", "Сколько потрачено"),
+        BotCommand("stats", "Траты по категориям"),
+        BotCommand("budget", "Бюджет на месяц"),
+        BotCommand("token", "Токен для входа в приложение и на сайт"),
+        BotCommand("link", "Привязать бот к аккаунту приложения"),
+        BotCommand("help", "Справка по командам"),
+    )
+    runCatching {
+        client.get("$base/setMyCommands") {
+            parameter("commands", botJson.encodeToString(commands))
+        }
+        println("Бот: меню команд зарегистрировано (setMyCommands).")
+    }.onFailure { println("Бот: не удалось задать меню команд — ${it.message}") }
 }
 
 // Формат даты в ответах бота: "18.07 04:27".

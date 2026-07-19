@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,11 +59,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.vihrea1337.expenses.android.data.Expense
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 private val PERIODS = listOf("Сегодня", "Неделя", "Месяц", "Всё")
@@ -93,12 +97,25 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> U
         .groupBy { it.categoryGroup ?: "без категории" }
         .map { (group, list) -> group to list.sumOf { it.amount } }
         .sortedByDescending { it.second }
+    val trend = buildTrend(filtered, periodIndex)
     val monthSpent = state.expenses.filter { inCurrentMonth(it.createdAt) }.sumOf { it.amount }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (selectedTab == 0) "Аналитика" else "Мои траты") },
+                title = {
+                    Column {
+                        Text(if (selectedTab == 0) "Аналитика" else "Мои траты")
+                        // Под заголовком — имя вошедшего аккаунта (сохранено при входе в TokenStore).
+                        TokenStore.userName?.let { name ->
+                            Text(
+                                name,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
                 actions = { TextButton(onClick = onLogout) { Text("Выйти") } },
             )
         },
@@ -149,6 +166,7 @@ fun ExpensesScreen(viewModel: ExpensesViewModel = viewModel(), onLogout: () -> U
             when (selectedTab) {
                 0 -> AnalyticsTab(
                     breakdown = breakdown,
+                    trend = trend,
                     total = total,
                     budget = state.monthlyBudget,
                     monthSpent = monthSpent,
@@ -279,10 +297,11 @@ private fun ListTab(
     }
 }
 
-/** Вкладка «Аналитика»: кольцевая диаграмма по категориям + карточка бюджета. */
+/** Вкладка «Аналитика»: кольцо по категориям + график по времени + карточка бюджета. */
 @Composable
 private fun AnalyticsTab(
     breakdown: List<Pair<String, Double>>,
+    trend: List<TrendBar>,
     total: Double,
     budget: Double?,
     monthSpent: Double,
@@ -305,6 +324,10 @@ private fun AnalyticsTab(
             }
         } else {
             BreakdownSection(rows = breakdown, total = total)
+        }
+        if (trend.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            TrendSection(bars = trend)
         }
         Spacer(Modifier.height(12.dp))
         BudgetCard(budget = budget, spent = monthSpent, onEdit = onEditBudget)
@@ -439,6 +462,71 @@ private fun BreakdownSection(rows: List<Pair<String, Double>>, total: Double) {
                     "${formatAmount(sum)} ₽ · $percent%",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** Один столбик графика «по времени»: подпись (день/месяц) и сумма за него. */
+private data class TrendBar(val label: String, val amount: Double)
+
+/**
+ * График трат по времени: столбики (одна серия — сумма за интервал), привязаны к нижней линии.
+ * Высота столбика — доля от максимального интервала. Легенда не нужна: заголовок называет серию.
+ */
+@Composable
+private fun TrendSection(bars: List<TrendBar>) {
+    if (bars.isEmpty()) return
+    val accent = MaterialTheme.colorScheme.primary
+    val maxAmount = bars.maxOf { it.amount }.coerceAtLeast(1.0)
+    val peak = bars.maxByOrNull { it.amount }
+    // Подписи оси показываем не для каждого столбика (иначе сольются), а через шаг ≈ 8 штук.
+    val step = ((bars.size + 7) / 8).coerceAtLeast(1)
+
+    Column(Modifier.padding(vertical = 8.dp)) {
+        Text("По времени", style = MaterialTheme.typography.titleSmall)
+        if (peak != null && peak.amount > 0) {
+            Text(
+                "Пик: ${formatAmount(peak.amount)} ₽ (${peak.label})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        // Ряд столбиков: высота = доля суммы от максимума, дно выровнено по нижней линии.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(120.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            bars.forEach { bar ->
+                val fraction = (bar.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(fraction)
+                        .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                        .background(accent),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        // Подписи под столбиками (каждая step-я).
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            bars.forEachIndexed { i, bar ->
+                Text(
+                    if (i % step == 0) bar.label else "",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
                 )
             }
         }
@@ -645,6 +733,49 @@ private fun inCurrentMonth(createdAt: String): Boolean {
     val date = runCatching { LocalDate.parse(createdAt.take(10)) }.getOrNull() ?: return false
     val now = LocalDate.now()
     return date.year == now.year && date.monthValue == now.monthValue
+}
+
+// Формат подписи месяца на графике «Всё»: "07.25".
+private val MONTH_FMT = DateTimeFormatter.ofPattern("MM.yy")
+
+/**
+ * Разбивка трат по времени для графика. Для «Недели»/«Месяца» — по дням (7 или 30 столбиков,
+ * включая дни без трат = 0). Для «Всё» — по месяцам (иначе столбиков было бы слишком много).
+ * Для «Сегодня» график не строим (один день — тренда нет) → пустой список.
+ */
+private fun buildTrend(expenses: List<Expense>, periodIndex: Int): List<TrendBar> {
+    if (periodIndex == 0) return emptyList()
+    val today = LocalDate.now()
+    // Пара (дата, сумма) для каждой траты с распознанной датой.
+    val dated = expenses.mapNotNull { e ->
+        runCatching { LocalDate.parse(e.createdAt.take(10)) }.getOrNull()?.let { it to e.amount }
+    }
+    if (dated.isEmpty()) return emptyList()
+
+    // «Всё» — по календарным месяцам, от первого месяца с тратами до текущего.
+    if (periodIndex == 3) {
+        val sums = dated.groupBy { YearMonth.from(it.first) }
+            .mapValues { entry -> entry.value.sumOf { it.second } }
+        val bars = mutableListOf<TrendBar>()
+        var month = sums.keys.min()
+        val last = YearMonth.from(today)
+        while (!month.isAfter(last)) {
+            bars += TrendBar(month.format(MONTH_FMT), sums[month] ?: 0.0)
+            month = month.plusMonths(1)
+        }
+        return bars
+    }
+
+    // «Неделя»/«Месяц» — по дням: непрерывный ряд последних 7 или 30 дней.
+    val days = if (periodIndex == 1) 7 else 30
+    val start = today.minusDays((days - 1).toLong())
+    val sums = dated.filter { !it.first.isBefore(start) }
+        .groupBy { it.first }
+        .mapValues { entry -> entry.value.sumOf { it.second } }
+    return (0 until days).map { i ->
+        val day = start.plusDays(i.toLong())
+        TrendBar(day.dayOfMonth.toString(), sums[day] ?: 0.0)
+    }
 }
 
 /** 200.0 -> "200", 149.5 -> "149.5" (убираем лишний ".0" у целых сумм). */
