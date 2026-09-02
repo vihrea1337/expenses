@@ -128,6 +128,28 @@ class DbRepositoryTest {
     }
 
     @Test
+    fun `повторная отправка того же id не создаёт дубль`() {
+        val a = UserRepository.create("A")
+        val clientId = UUID.randomUUID().toString()
+
+        val first = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", id = clientId))
+        // Тот же id, но данные "изменились" в пути (например, клиент собрал запрос заново) —
+        // важно, что от повтора выигрывает то, что уже сохранено, а не новые данные.
+        val retry = ExpenseRepository.add(a.id, NewExpense(amount = 999.0, category = "другое", id = clientId))
+
+        assertEquals(first.id, retry.id)
+        assertEquals(first.amount, retry.amount, "повтор не должен перезаписать сумму")
+        assertEquals(1, ExpenseRepository.all(a.id).size, "должна остаться одна запись, а не две")
+    }
+
+    @Test
+    fun `некорректный id игнорируется — сервер сам назначает новый`() {
+        val a = UserRepository.create("A")
+        val saved = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", id = "не-uuid"))
+        assertNotNull(UUID.fromString(saved.id), "сервер должен подставить свой валидный UUID")
+    }
+
+    @Test
     fun `linkTelegram переносит траты и telegram_id на целевой аккаунт`() {
         val owner = UserRepository.create("Владелец") // аккаунт приложения/веба
         val bot = UserRepository.findOrCreateByTelegram(777L, "Бот-аккаунт")

@@ -31,21 +31,42 @@ object ExpenseRepository {
         Expenses.selectAll().where { Expenses.userId eq userId }.map(::rowToExpense)
     }
 
-    /** Добавить трату пользователю. Сервер сам назначает id и время. */
-    fun add(userId: UUID, new: NewExpense): Expense {
-        val id = UUID.randomUUID()
-        val now = LocalDateTime.now()
-        transaction {
-            Expenses.insert {
-                it[Expenses.id] = id
-                it[Expenses.amount] = new.amount.toBigDecimal()
-                it[Expenses.category] = new.category
-                it[Expenses.note] = new.note
-                it[Expenses.createdAt] = now
-                it[Expenses.userId] = userId
-            }
+    /**
+     * Добавить трату пользователю. Время назначает сервер.
+     *
+     * Идемпотентность: если клиент прислал свой [NewExpense.id] (валидный UUID) и трата с
+     * таким id у этого пользователя уже есть — это повторная отправка (например, retry после
+     * обрыва сети), и мы просто возвращаем уже сохранённую запись, не создавая дубль.
+     * Если id не пришёл или он не похож на UUID — ведём себя как раньше: сервер сам
+     * придумывает новый id (так работает, например, Telegram-бот).
+     *
+     * `id` — общий первичный ключ таблицы на всех пользователей, а не отдельный на каждого,
+     * поэтому теоретическая коллизия (два разных пользователя одновременно "угадали" один и тот
+     * же случайный UUID) упадёт с ошибкой уникальности прямо здесь, а не тихо перепутает чужие
+     * траты. Вероятность такой коллизии ничтожна (UUID — 122 случайных бита), поэтому отдельно
+     * не обрабатываем.
+     */
+    fun add(userId: UUID, new: NewExpense): Expense = transaction {
+        val clientId = new.id?.let { raw -> runCatching { UUID.fromString(raw) }.getOrNull() }
+
+        if (clientId != null) {
+            val existing = Expenses.selectAll()
+                .where { (Expenses.id eq clientId) and (Expenses.userId eq userId) }
+                .firstOrNull()
+            if (existing != null) return@transaction rowToExpense(existing)
         }
-        return Expense(
+
+        val id = clientId ?: UUID.randomUUID()
+        val now = LocalDateTime.now()
+        Expenses.insert {
+            it[Expenses.id] = id
+            it[Expenses.amount] = new.amount.toBigDecimal()
+            it[Expenses.category] = new.category
+            it[Expenses.note] = new.note
+            it[Expenses.createdAt] = now
+            it[Expenses.userId] = userId
+        }
+        Expense(
             id = id.toString(),
             amount = new.amount,
             category = new.category,

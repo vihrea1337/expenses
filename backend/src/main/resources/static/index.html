@@ -104,6 +104,12 @@
             white-space: nowrap; overflow: hidden;
         }
         .hidden { display: none; }
+        /* Подсказка при наведении на сектор кольцевой диаграммы — следует за курсором. */
+        .donut-tip {
+            position: fixed; pointer-events: none; z-index: 10;
+            background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+            padding: 4px 8px; font-size: 13px; box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+        }
     </style>
 </head>
 <body>
@@ -163,6 +169,9 @@
         </div>
     </div>
 </div>
+
+<!-- Подсказка над сектором donut-диаграммы при наведении мышью (JS двигает и заполняет её). -->
+<div class="donut-tip hidden" id="donutTip"></div>
 
 <script>
     const API = '/api/expenses';
@@ -229,7 +238,7 @@
 
     function money(v) { return Number.isInteger(v) ? String(v) : String(v); }
 
-    // Категориальная палитра (референс dataviz-гайда): 8 хуёв в фиксированном порядке под
+    // Категориальная палитра (референс dataviz-гайда): 8 оттенков в фиксированном порядке под
     // светлую/тёмную тему; цвет закреплён за категорией. Остальное («прочее», «без категории») — серый.
     const CAT_ORDER = ['еда', 'транспорт', 'дом', 'развлечения', 'здоровье', 'одежда', 'связь', 'подарки'];
     const CAT_HUES_LIGHT = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948'];
@@ -376,11 +385,52 @@
 
         breakdownEl.innerHTML = `<div class="topbar"><span class="bd-title">По категориям</span>
             <button class="linkbtn" id="reclassifyBtn" title="Определить категории через ИИ">↻ ИИ</button></div>
-            <div class="donut" style="background: conic-gradient(${stops})">
+            <div class="donut" id="donut" style="background: conic-gradient(${stops})">
                 <div class="donut-hole"><span>${money(total)} ₽</span></div>
             </div>
             ${legend}`;
         document.getElementById('reclassifyBtn').addEventListener('click', reclassify);
+        attachDonutHover(groups, total);
+    }
+
+    // Наведение на кольцевую диаграмму: conic-gradient рисует секторы одной заливкой без
+    // отдельных DOM-элементов, поэтому обычный title на каждый сектор не повесить — считаем
+    // угол курсора от центра вручную и сравниваем с границами долей (те же проценты, что
+    // ушли в conic-gradient). conic-gradient идёт по часовой стрелке от 12 часов — так же
+    // считаем и угол наведения.
+    function attachDonutHover(groups, total) {
+        const donutEl = document.getElementById('donut');
+        const tip = document.getElementById('donutTip');
+        let acc = 0;
+        const sectors = groups.map(([g, sum]) => {
+            const from = total > 0 ? acc / total * 360 : 0;
+            acc += sum;
+            const to = total > 0 ? acc / total * 360 : 0;
+            return { group: g, sum, from, to };
+        });
+
+        donutEl.addEventListener('mousemove', (ev) => {
+            const rect = donutEl.getBoundingClientRect();
+            const scale = rect.width / 170; // диаграмма всегда 170px, но на всякий случай пересчитываем
+            const dx = ev.clientX - (rect.left + rect.width / 2);
+            const dy = ev.clientY - (rect.top + rect.height / 2);
+            const dist = Math.hypot(dx, dy);
+            const holeR = 51 * scale; // радиус дырки (inset 34px от радиуса 85px)
+            const outerR = rect.width / 2;
+            if (dist < holeR || dist > outerR) { tip.classList.add('hidden'); return; }
+
+            let deg = Math.atan2(dx, -dy) * 180 / Math.PI; // 0° = 12 часов, по часовой стрелке
+            if (deg < 0) deg += 360;
+            const hit = sectors.find((s) => deg >= s.from && deg < s.to);
+            if (!hit) { tip.classList.add('hidden'); return; }
+
+            const pct = total > 0 ? Math.round(hit.sum / total * 100) : 0;
+            tip.textContent = `${hit.group}: ${money(hit.sum)} ₽ · ${pct}%`;
+            tip.style.left = (ev.clientX + 12) + 'px';
+            tip.style.top = (ev.clientY + 12) + 'px';
+            tip.classList.remove('hidden');
+        });
+        donutEl.addEventListener('mouseleave', () => tip.classList.add('hidden'));
     }
 
     // Скачать все траты в CSV. Токен нужен в заголовке, поэтому качаем через fetch и сохраняем
@@ -540,6 +590,18 @@
         }
     }
 
+    // Свой id для новой траты — если запрос уйдёт, но ответ потеряется (обрыв связи), повторный
+    // клик "Добавить" отправит тот же id, и сервер не создаст вторую запись (см. NewExpense.id).
+    function newId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        // Запасной вариант для очень старых браузеров без crypto.randomUUID.
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
     function escapeHtml(s) {
         const div = document.createElement('div');
         div.textContent = s;
@@ -620,7 +682,7 @@
             const res = await apiFetch(API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount, category, note: noteRaw || null }),
+                body: JSON.stringify({ amount, category, note: noteRaw || null, id: newId() }),
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             document.getElementById('category').value = '';

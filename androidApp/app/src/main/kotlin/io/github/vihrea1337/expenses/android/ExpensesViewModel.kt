@@ -2,11 +2,12 @@ package io.github.vihrea1337.expenses.android
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.vihrea1337.expenses.BudgetDto
+import io.github.vihrea1337.expenses.Expense
+import io.github.vihrea1337.expenses.NewExpense
+import io.github.vihrea1337.expenses.UpdateExpense
 import io.github.vihrea1337.expenses.android.data.ApiClient
-import io.github.vihrea1337.expenses.android.data.BudgetDto
-import io.github.vihrea1337.expenses.android.data.Expense
-import io.github.vihrea1337.expenses.android.data.NewExpense
-import io.github.vihrea1337.expenses.android.data.UpdateExpense
+import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,8 +91,15 @@ class ExpensesViewModel : ViewModel() {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 ApiClient.api.addExpense(
-                    // Пустую заметку не отправляем (шлём null, а не "").
-                    NewExpense(amount = amount, category = category.trim(), note = note?.trim()?.ifBlank { null }),
+                    NewExpense(
+                        amount = amount,
+                        category = category.trim(),
+                        // Пустую заметку не отправляем (шлём null, а не "").
+                        note = note?.trim()?.ifBlank { null },
+                        // Свой id — если сеть оборвётся после того, как сервер уже сохранил
+                        // трату, повторный тап "Добавить" с тем же id не создаст дубль.
+                        id = UUID.randomUUID().toString(),
+                    ),
                 )
                 onSuccess()
                 refresh()     // сразу обновляем список, чтобы увидеть новую трату
