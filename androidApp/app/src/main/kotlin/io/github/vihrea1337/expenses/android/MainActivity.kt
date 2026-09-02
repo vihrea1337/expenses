@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.github.vihrea1337.expenses.android.data.local.ExpensesDatabase
 
 /**
  * Единственная Activity. Показывает экран входа, пока нет токена, иначе — экран трат.
@@ -20,6 +21,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         TokenStore.init(applicationContext) // загрузить сохранённый токен
+        ExpensesDatabase.init(applicationContext) // открыть локальный кэш трат (офлайн-first)
         enableEdgeToEdge()
         setContent {
             MaterialTheme {

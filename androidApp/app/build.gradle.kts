@@ -15,6 +15,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     // Плагин kotlinx.serialization — чтобы @Serializable-классы умели превращаться в JSON.
     id("org.jetbrains.kotlin.plugin.serialization")
+    // KSP — генерирует реализацию DAO для Room по аннотациям (без него Room не работает).
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -87,4 +89,19 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.12.0")
     implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Room — локальный кэш трат (офлайн-first): экран читает список из базы на телефоне,
+    // а не напрямую из сети, и работает даже без связи. room-ktx даёт корутины/Flow.
+    val roomVersion = "2.8.4"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+
+    // Тесты Room-запросов на JVM (без эмулятора/телефона): Robolectric подсовывает настоящую
+    // SQLite-реализацию Android для юнит-тестов в src/test.
+    testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }

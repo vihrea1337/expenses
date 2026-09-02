@@ -4,10 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.vihrea1337.expenses.BudgetDto
 import io.github.vihrea1337.expenses.Expense
-import io.github.vihrea1337.expenses.NewExpense
 import io.github.vihrea1337.expenses.UpdateExpense
 import io.github.vihrea1337.expenses.android.data.ApiClient
-import java.util.UUID
+import io.github.vihrea1337.expenses.android.data.ExpensesRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,9 +16,10 @@ import kotlinx.coroutines.launch
 
 /**
  * Всё состояние экрана в одном объекте:
- *  expenses — список трат для показа;
- *  isLoading — идёт ли сейчас запрос к серверу (крутилка, блокировка кнопки);
- *  error — текст ошибки, если что-то пошло не так (иначе null).
+ *  expenses — список трат для показа (приходит из локального кэша, см. init);
+ *  isLoading — идёт ли сейчас синхронизация с сервером (крутилка, блокировка кнопки);
+ *  error — текст ошибки, если синхронизация не удалась (иначе null). Список при этом
+ *          НЕ пропадает — это лишь предупреждение поверх уже показанных сохранённых данных.
  */
 data class ExpensesUiState(
     val expenses: List<Expense> = emptyList(),
@@ -29,36 +29,42 @@ data class ExpensesUiState(
 )
 
 /**
- * ViewModel — "мозг" экрана: хранит состояние и ходит в сеть, переживает поворот экрана.
+ * ViewModel — "мозг" экрана: хранит состояние, переживает поворот экрана.
  * Экран (Compose) только рисует то, что здесь лежит, и зовёт эти функции по нажатиям.
+ *
+ * Офлайн-first: список трат ЧИТАЕТСЯ из локального кэша (Room, через
+ * [ExpensesRepository.observeExpenses]) — работает и без сети. Сеть используется только
+ * фоном, чтобы кэш не расходился с сервером ([ExpensesRepository.sync]). Подробнее о том,
+ * что офлайн покрыто, а что нет — см. комментарий у ExpensesRepository.
  */
 class ExpensesViewModel : ViewModel() {
 
     private val _state = MutableStateFlow(ExpensesUiState())
     val state: StateFlow<ExpensesUiState> = _state.asStateFlow()
 
-    // При создании ViewModel сразу загружаем список.
     init {
+        // Список — реактивно из кэша: любое изменение таблицы (синхронизация, оптимистичное
+        // добавление) сразу долетает до экрана, без ручных перезапросов.
+        viewModelScope.launch {
+            ExpensesRepository.observeExpenses().collect { list ->
+                _state.update { it.copy(expenses = list.sortedByDescending { e -> e.createdAt }) }
+            }
+        }
         refresh()
     }
 
-    /** Перезагрузить список трат с сервера. */
+    /** Синхронизировать кэш с сервером (отправить неотправленное + подтянуть свежий список). */
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val list = ApiClient.api.getExpenses()
+                ExpensesRepository.sync()
                 val budget = ApiClient.api.getBudget().monthlyBudget
-                // Свежие траты — сверху (сортируем по времени создания по убыванию).
-                _state.update {
-                    it.copy(
-                        expenses = list.sortedByDescending { e -> e.createdAt },
-                        monthlyBudget = budget,
-                        isLoading = false,
-                    )
-                }
+                _state.update { it.copy(monthlyBudget = budget, isLoading = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
+                // Кэш уже показан подпиской выше и никуда не пропадает — просто предупреждаем,
+                // что свежих данных с сервера сейчас нет.
+                _state.update { it.copy(isLoading = false, error = "Нет связи с сервером — показаны сохранённые данные") }
             }
         }
     }
@@ -78,7 +84,8 @@ class ExpensesViewModel : ViewModel() {
 
     /**
      * Добавить трату. category — категория, amountText — сумма как её ввёл пользователь (строка).
-     * onSuccess вызовется после успешной отправки (экран очистит поля ввода).
+     * onSuccess вызовется сразу (оптимистично, до всякой сети) — экран очистит поля ввода
+     * и увидит новую трату в списке мгновенно, даже без связи.
      */
     fun addExpense(category: String, amountText: String, note: String?, onSuccess: () -> Unit) {
         // Запятую тоже принимаем как разделитель дробной части (150,5 -> 150.5).
@@ -88,31 +95,22 @@ class ExpensesViewModel : ViewModel() {
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                ApiClient.api.addExpense(
-                    NewExpense(
-                        amount = amount,
-                        category = category.trim(),
-                        // Пустую заметку не отправляем (шлём null, а не "").
-                        note = note?.trim()?.ifBlank { null },
-                        // Свой id — если сеть оборвётся после того, как сервер уже сохранил
-                        // трату, повторный тап "Добавить" с тем же id не создаст дубль.
-                        id = UUID.randomUUID().toString(),
-                    ),
-                )
-                onSuccess()
-                refresh()     // сразу обновляем список, чтобы увидеть новую трату
-                refreshSoon() // и ещё раз через пару секунд — подтянуть ИИ-категорию
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
-            }
+            ExpensesRepository.addExpenseOptimistic(
+                amount = amount,
+                category = category.trim(),
+                // Пустую заметку не сохраняем (null, а не "").
+                note = note?.trim()?.ifBlank { null },
+            )
+            onSuccess()
+            refresh()     // отправить на сервер сразу, если сеть есть; если нет — уйдёт позже
+            refreshSoon() // и ещё раз через пару секунд — подтянуть ИИ-категорию
         }
     }
 
     /**
      * Отредактировать трату. group = null — категорию переопределит ИИ; иначе ручная правка.
-     * onSuccess закроет диалог.
+     * onSuccess закроет диалог. Требует сети — офлайн-редактирование не реализовано
+     * (см. комментарий у ExpensesRepository, почему это сознательный выбор).
      */
     fun editExpense(id: String, category: String, amountText: String, note: String?, group: String?, onSuccess: () -> Unit) {
         val amount = amountText.replace(',', '.').toDoubleOrNull()
@@ -162,7 +160,10 @@ class ExpensesViewModel : ViewModel() {
         }
     }
 
-    /** Удалить трату по id и обновить список. */
+    /**
+     * Удалить трату по id и обновить список. Требует сети — офлайн-удаление не реализовано
+     * (см. комментарий у ExpensesRepository).
+     */
     fun deleteExpense(id: String) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
