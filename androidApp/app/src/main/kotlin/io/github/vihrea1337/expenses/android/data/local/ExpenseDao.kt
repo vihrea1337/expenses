@@ -10,15 +10,27 @@ import kotlinx.coroutines.flow.Flow
 interface ExpenseDao {
     /**
      * Flow — экран подписывается один раз и дальше сам перерисовывается при любом изменении
-     * таблицы (добавили трату, синхронизация подтянула свежие данные и т.д.), без ручных
-     * перезапросов.
+     * таблицы, без ручных перезапросов. `pendingDelete = 0` — трата, помеченная на удаление,
+     * пропадает из списка сразу (оптимистично), хотя физически строка ещё в базе — ждёт,
+     * пока синхронизация подтвердит удаление на сервере.
      */
-    @Query("SELECT * FROM expenses ORDER BY createdAt DESC")
+    @Query("SELECT * FROM expenses WHERE pendingDelete = 0 ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<ExpenseEntity>>
 
-    /** Траты, ещё не подтверждённые сервером — их нужно (пере)отправить при синхронизации. */
-    @Query("SELECT * FROM expenses WHERE synced = 0")
+    @Query("SELECT * FROM expenses WHERE id = :id")
+    suspend fun getById(id: String): ExpenseEntity?
+
+    /** Траты, ещё не подтверждённые сервером — их нужно ОТПРАВИТЬ (POST) при синхронизации. */
+    @Query("SELECT * FROM expenses WHERE synced = 0 AND pendingDelete = 0")
     suspend fun unsynced(): List<ExpenseEntity>
+
+    /** Траты, отредактированные офлайн после того, как сервер их уже знал — ждут PUT. */
+    @Query("SELECT * FROM expenses WHERE synced = 1 AND dirty = 1 AND pendingDelete = 0")
+    suspend fun dirtyRows(): List<ExpenseEntity>
+
+    /** Траты, помеченные на удаление — ждут DELETE. */
+    @Query("SELECT * FROM expenses WHERE pendingDelete = 1")
+    suspend fun pendingDeletes(): List<ExpenseEntity>
 
     /** REPLACE по id: и добавление новой траты, и обновление уже существующей (одна и та же операция). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -27,13 +39,9 @@ interface ExpenseDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(expenses: List<ExpenseEntity>)
 
-    /**
-     * Убрать из кэша траты, которых больше нет на сервере (удалены с другого клиента),
-     * НЕ трогая ещё не отправленные (synced = 0) — иначе офлайн-трата исчезла бы, толком
-     * не долетев до сервера.
-     */
-    @Query("DELETE FROM expenses WHERE synced = 1 AND id NOT IN (:keepIds)")
-    suspend fun pruneMissing(keepIds: List<String>)
+    /** Пометить трату на удаление (не стирает строку — см. ExpenseEntity.pendingDelete). */
+    @Query("UPDATE expenses SET pendingDelete = 1 WHERE id = :id")
+    suspend fun markPendingDelete(id: String)
 
     @Query("DELETE FROM expenses WHERE id = :id")
     suspend fun deleteById(id: String)

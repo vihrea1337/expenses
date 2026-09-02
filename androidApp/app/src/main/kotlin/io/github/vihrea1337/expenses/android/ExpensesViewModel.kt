@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.vihrea1337.expenses.BudgetDto
 import io.github.vihrea1337.expenses.Expense
-import io.github.vihrea1337.expenses.UpdateExpense
 import io.github.vihrea1337.expenses.android.data.ApiClient
 import io.github.vihrea1337.expenses.android.data.ExpensesRepository
 import kotlinx.coroutines.delay
@@ -33,9 +32,10 @@ data class ExpensesUiState(
  * Экран (Compose) только рисует то, что здесь лежит, и зовёт эти функции по нажатиям.
  *
  * Офлайн-first: список трат ЧИТАЕТСЯ из локального кэша (Room, через
- * [ExpensesRepository.observeExpenses]) — работает и без сети. Сеть используется только
- * фоном, чтобы кэш не расходился с сервером ([ExpensesRepository.sync]). Подробнее о том,
- * что офлайн покрыто, а что нет — см. комментарий у ExpensesRepository.
+ * [ExpensesRepository.observeExpenses]) — работает и без сети. Добавление, правка и удаление
+ * трат тоже работают офлайн (пишутся в кэш немедленно, реальная отправка — фоном при
+ * следующей [ExpensesRepository.sync]). Подробности протокола синхронизации и разрешения
+ * конфликтов — см. комментарий у ExpensesRepository.
  */
 class ExpensesViewModel : ViewModel() {
 
@@ -109,8 +109,8 @@ class ExpensesViewModel : ViewModel() {
 
     /**
      * Отредактировать трату. group = null — категорию переопределит ИИ; иначе ручная правка.
-     * onSuccess закроет диалог. Требует сети — офлайн-редактирование не реализовано
-     * (см. комментарий у ExpensesRepository, почему это сознательный выбор).
+     * onSuccess вызывается сразу (оптимистично) — экран увидит правку мгновенно, даже без
+     * сети; реальный PUT уйдёт на сервер при следующей синхронизации ([ExpensesRepository.sync]).
      */
     fun editExpense(id: String, category: String, amountText: String, note: String?, group: String?, onSuccess: () -> Unit) {
         val amount = amountText.replace(',', '.').toDoubleOrNull()
@@ -119,15 +119,16 @@ class ExpensesViewModel : ViewModel() {
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                ApiClient.api.editExpense(id, UpdateExpense(amount, category.trim(), note?.trim()?.ifBlank { null }, group))
-                onSuccess()
-                refresh()
-                if (group == null) refreshSoon() // авто-категория проставится в фоне — подтянем позже
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
-            }
+            ExpensesRepository.editExpenseOptimistic(
+                id = id,
+                amount = amount,
+                category = category.trim(),
+                note = note?.trim()?.ifBlank { null },
+                categoryGroup = group,
+            )
+            onSuccess()
+            refresh()
+            if (group == null) refreshSoon() // авто-категория проставится в фоне — подтянем позже
         }
     }
 
@@ -161,19 +162,13 @@ class ExpensesViewModel : ViewModel() {
     }
 
     /**
-     * Удалить трату по id и обновить список. Требует сети — офлайн-удаление не реализовано
-     * (см. комментарий у ExpensesRepository).
+     * Удалить трату по id. Пропадает из списка сразу (оптимистично, даже без сети); реальный
+     * DELETE уйдёт на сервер при следующей синхронизации ([ExpensesRepository.sync]).
      */
     fun deleteExpense(id: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                val response = ApiClient.api.deleteExpense(id)
-                if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code()}")
-                refresh()
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message ?: "Ошибка сети") }
-            }
+            ExpensesRepository.deleteExpenseOptimistic(id)
+            refresh()
         }
     }
 }

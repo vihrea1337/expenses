@@ -2,6 +2,7 @@ package io.github.vihrea1337.expenses.android.data
 
 import io.github.vihrea1337.expenses.BudgetDto
 import io.github.vihrea1337.expenses.Expense
+import io.github.vihrea1337.expenses.ExpensesChangesDto
 import io.github.vihrea1337.expenses.MeResponse
 import io.github.vihrea1337.expenses.NewExpense
 import io.github.vihrea1337.expenses.RegisterRequest
@@ -21,6 +22,7 @@ import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * Описание "ручек" нашего REST API. Retrofit по этому интерфейсу сам сгенерирует
@@ -34,6 +36,14 @@ interface ExpensesApi {
     /** POST /api/expenses — добавить трату; в тело кладём NewExpense, сервер вернёт готовую Expense. */
     @POST("api/expenses")
     suspend fun addExpense(@Body body: NewExpense): Expense
+
+    /**
+     * GET /api/expenses/changes — что изменилось после момента [since] (null — вся история),
+     * включая мягко удалённые (`deleted = true`). Основа офлайн-синхронизации: полный список
+     * не гоняем, только дельту.
+     */
+    @GET("api/expenses/changes")
+    suspend fun getExpensesChanges(@Query("since") since: String?, @Query("limit") limit: Int = 200): ExpensesChangesDto
 
     /**
      * DELETE /api/expenses/{id} — удалить трату по id.
