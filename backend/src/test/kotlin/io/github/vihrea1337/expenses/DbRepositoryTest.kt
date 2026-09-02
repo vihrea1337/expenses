@@ -2,9 +2,12 @@ package io.github.vihrea1337.expenses
 
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.deleteAll
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import java.time.LocalDateTime
 import java.util.UUID
 import kotlin.test.BeforeTest
@@ -78,15 +81,16 @@ class DbRepositoryTest {
         val e = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", note = "зерно"))
         val eid = UUID.fromString(e.id)
 
-        val upd = ExpenseRepository.updateExpense(a.id, eid, 150.0, "чай", "утро", "напитки")
+        val upd = ExpenseRepository.updateExpense(a.id, eid, 150.0, "чай", "утро", "напитки", "поездка")
         assertNotNull(upd)
         assertEquals(150.0, upd.amount)
         assertEquals("чай", upd.category)
         assertEquals("утро", upd.note)
         assertEquals("напитки", upd.categoryGroup)
+        assertEquals("поездка", upd.tag)
 
         assertNull(
-            ExpenseRepository.updateExpense(b.id, eid, 1.0, "x", null, null),
+            ExpenseRepository.updateExpense(b.id, eid, 1.0, "x", null, null, null),
             "B не должен отредактировать трату A",
         )
     }
@@ -178,7 +182,7 @@ class DbRepositoryTest {
         val e = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе"))
         val eid = UUID.fromString(e.id)
         ExpenseRepository.delete(a.id, eid)
-        assertNull(ExpenseRepository.updateExpense(a.id, eid, 1.0, "x", null, null))
+        assertNull(ExpenseRepository.updateExpense(a.id, eid, 1.0, "x", null, null, null))
     }
 
     @Test
@@ -198,7 +202,7 @@ class DbRepositoryTest {
         val a = UserRepository.create("A")
         val e = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе"))
         Thread.sleep(5)
-        val updated = ExpenseRepository.updateExpense(a.id, UUID.fromString(e.id), 200.0, "чай", null, null)
+        val updated = ExpenseRepository.updateExpense(a.id, UUID.fromString(e.id), 200.0, "чай", null, null, null)
         assertNotNull(updated)
         assertTrue(
             updated.updatedAt.asDateTime().isAfter(e.updatedAt.asDateTime()),
@@ -242,6 +246,66 @@ class DbRepositoryTest {
         assertEquals(2, changes.size, "и новая трата, и надгробие старой — обе новее since")
         assertTrue(byId[e2.id]?.deleted == false)
         assertTrue(byId[e1.id]?.deleted == true, "надгробие удалённой (хоть и старой) траты должно попасть в изменения")
+    }
+
+    @Test
+    fun `add сохраняет тег, all без фильтра отдаёт всё`() {
+        val a = UserRepository.create("A")
+        val e = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", tag = "поездка"))
+        assertEquals("поездка", e.tag)
+        assertEquals(1, ExpenseRepository.all(a.id).size)
+    }
+
+    @Test
+    fun `all с tag фильтрует без учёта регистра и только свои`() {
+        val a = UserRepository.create("A")
+        val b = UserRepository.create("B")
+        ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", tag = "поездка"))
+        ExpenseRepository.add(a.id, NewExpense(amount = 50.0, category = "такси", tag = "Поездка"))
+        ExpenseRepository.add(a.id, NewExpense(amount = 30.0, category = "хлеб")) // без тега
+        ExpenseRepository.add(b.id, NewExpense(amount = 10.0, category = "чужое", tag = "поездка"))
+
+        val trip = ExpenseRepository.all(a.id, tag = "поездка")
+        assertEquals(2, trip.size, "разный регистр тега («поездка»/«Поездка») — один и тот же тег")
+
+        val tripUpper = ExpenseRepository.all(a.id, tag = "ПОЕЗДКА")
+        assertEquals(2, tripUpper.size, "фильтр тоже не чувствителен к регистру запроса")
+
+        assertEquals(3, ExpenseRepository.all(a.id).size, "без фильтра — все свои траты")
+        assertEquals(0, ExpenseRepository.all(a.id, tag = "нет такого").size)
+    }
+
+    @Test
+    fun `удалённая с тегом трата не попадает в фильтр по тегу`() {
+        val a = UserRepository.create("A")
+        val e = ExpenseRepository.add(a.id, NewExpense(amount = 100.0, category = "кофе", tag = "поездка"))
+        ExpenseRepository.delete(a.id, UUID.fromString(e.id))
+        assertEquals(0, ExpenseRepository.all(a.id, tag = "поездка").size)
+    }
+
+    @Test
+    fun `deleteTombstonesOlderThan стирает только старые надгробия, не трогая свежие и живые траты`() {
+        val a = UserRepository.create("A")
+        val old = ExpenseRepository.add(a.id, NewExpense(amount = 1.0, category = "старое"))
+        val fresh = ExpenseRepository.add(a.id, NewExpense(amount = 2.0, category = "свежее"))
+        val alive = ExpenseRepository.add(a.id, NewExpense(amount = 3.0, category = "живое"))
+
+        ExpenseRepository.delete(a.id, UUID.fromString(old.id))
+        ExpenseRepository.delete(a.id, UUID.fromString(fresh.id))
+        // "old" искусственно состарим напрямую в базе — delete() всегда ставит deleted_at = now().
+        transaction {
+            Expenses.update({ Expenses.id eq UUID.fromString(old.id) }) {
+                it[deletedAt] = LocalDateTime.now().minusDays(100)
+            }
+        }
+
+        val removed = ExpenseRepository.deleteTombstonesOlderThan(LocalDateTime.now().minusDays(90))
+        assertEquals(1, removed, "стереть должны ровно одно надгробие — старое")
+
+        val remainingIds = transaction { Expenses.selectAll().map { it[Expenses.id].toString() } }.toSet()
+        assertTrue(fresh.id in remainingIds, "свежее надгробие (моложе порога) остаётся")
+        assertTrue(alive.id in remainingIds, "неудалённая трата остаётся в любом случае")
+        assertTrue(old.id !in remainingIds, "старое надгробие стёрто физически")
     }
 
     @Test

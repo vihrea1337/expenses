@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 /** Класс базы, который Room генерирует по аннотации. Наружу отдаём его через object ниже. */
-@Database(entities = [ExpenseEntity::class], version = 2, exportSchema = false)
+@Database(entities = [ExpenseEntity::class], version = 3, exportSchema = false)
 abstract class RoomExpensesDatabase : RoomDatabase() {
     abstract fun expenseDao(): ExpenseDao
 }
@@ -27,12 +27,12 @@ object ExpensesDatabase {
             RoomExpensesDatabase::class.java,
             "expenses.db",
         )
-            // version 2 добавил dirty/pendingDelete/updatedAt (2026-09-02). Настоящая миграция
-            // избыточна: это чистый кэш сервера, а приложение ещё ни разу не ставилось на
-            // реальный телефон — терять внутри него нечего, при следующем запуске всё
-            // перекачается заново через /api/expenses/changes. Если это когда-нибудь
-            // изменится (на устройствах появятся настоящие несинхронизированные данные),
-            // destructive-миграцию нужно будет заменить на настоящую (Migration(1, 2) {...}).
+            // version 2 добавил dirty/pendingDelete/updatedAt, version 3 — tag (оба раза
+            // 2026-09-02). Настоящая миграция избыточна: это чистый кэш сервера, а приложение
+            // ещё ни разу не ставилось на реальный телефон — терять внутри него нечего, при
+            // следующем запуске всё перекачается заново через /api/expenses/changes. Если это
+            // когда-нибудь изменится (на устройствах появятся настоящие несинхронизированные
+            // данные), destructive-миграцию нужно будет заменить на настоящую (Migration(n, n+1) {...}).
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }

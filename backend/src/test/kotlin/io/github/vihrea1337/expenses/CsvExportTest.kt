@@ -17,6 +17,7 @@ class CsvExportTest {
         note: String? = null,
         createdAt: String = "2026-07-18T04:27:31",
         group: String? = null,
+        tag: String? = null,
     ) = Expense(
         id = "id",
         amount = amount,
@@ -24,6 +25,7 @@ class CsvExportTest {
         note = note,
         createdAt = createdAt,
         categoryGroup = group,
+        tag = tag,
     )
 
     @Test
@@ -31,36 +33,36 @@ class CsvExportTest {
         val csv = buildCsv(emptyList())
         assertTrue(csv.startsWith("﻿"), "нет BOM в начале файла")
         val firstLine = csv.split("\r\n").first()
-        assertEquals("﻿Дата;Категория;Сумма;Категория ИИ;Заметка", firstLine)
+        assertEquals("﻿Дата;Категория;Сумма;Категория ИИ;Тег;Заметка", firstLine)
     }
 
     @Test
     fun `простая трата — поля по порядку, дата укорочена, целая сумма без точки`() {
-        val csv = buildCsv(listOf(expense(amount = 200.0, category = "кофе", group = "еда")))
+        val csv = buildCsv(listOf(expense(amount = 200.0, category = "кофе", group = "еда", tag = "поездка")))
         val line = csv.split("\r\n")[1]
-        assertEquals("2026-07-18 04:27;кофе;200;еда;", line)
+        assertEquals("2026-07-18 04:27;кофе;200;еда;поездка;", line)
     }
 
     @Test
     fun `дробная сумма сохраняет точку, пустые поля пустые`() {
         val csv = buildCsv(listOf(expense(amount = 149.5, category = "обед")))
         val line = csv.split("\r\n")[1]
-        // categoryGroup и note не заданы → два пустых поля в конце.
-        assertEquals("2026-07-18 04:27;обед;149.5;;", line)
+        // categoryGroup, tag и note не заданы → три пустых поля в конце.
+        assertEquals("2026-07-18 04:27;обед;149.5;;;", line)
     }
 
     @Test
     fun `точка с запятой в поле оборачивается в кавычки`() {
         val csv = buildCsv(listOf(expense(amount = 100.0, category = "еда; напитки", note = "обед")))
         val line = csv.split("\r\n")[1]
-        assertEquals("2026-07-18 04:27;\"еда; напитки\";100;;обед", line)
+        assertEquals("2026-07-18 04:27;\"еда; напитки\";100;;;обед", line)
     }
 
     @Test
     fun `кавычки внутри поля удваиваются`() {
         val csv = buildCsv(listOf(expense(amount = 100.0, category = "кафе", note = "он \"молодец\"", group = "еда")))
         val line = csv.split("\r\n")[1]
-        assertEquals("2026-07-18 04:27;кафе;100;еда;\"он \"\"молодец\"\"\"", line)
+        assertEquals("2026-07-18 04:27;кафе;100;еда;;\"он \"\"молодец\"\"\"", line)
     }
 
     @Test

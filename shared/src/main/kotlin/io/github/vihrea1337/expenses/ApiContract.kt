@@ -43,6 +43,9 @@ data class Expense(
     // Мягкое удаление: true — это "надгробие". Из обычного GET /api/expenses такие не
     // приходят (сервер их фильтрует); появляются только в /api/expenses/changes.
     val deleted: Boolean = false,
+    // Один свободный тег ("поездка", "подарок", ...) — для аналитики и фильтрации отдельно
+    // от category (что купили) и categoryGroup (обобщение от ИИ). null — тег не проставлен.
+    val tag: String? = null,
 )
 
 /** Тело POST /api/expenses: трата, которую клиент ОТПРАВЛЯЕТ на сервер. */
@@ -58,6 +61,9 @@ data class NewExpense(
     // сохранённую запись (см. ExpenseRepository.add на бэкенде). null — id назначит сервер
     // (так работает, например, Telegram-бот, для которого идемпотентность не нужна).
     val id: String? = null,
+    // Свободный тег — необязательно, ставится вручную в Android/веб-форме (у бота
+    // короткий текстовый ввод "кофе 200" под тег не заводили — сознательно не расширяли).
+    val tag: String? = null,
 )
 
 /**
@@ -70,6 +76,7 @@ data class UpdateExpense(
     val category: String,
     val note: String? = null,
     val categoryGroup: String? = null,
+    val tag: String? = null,
 )
 
 /**

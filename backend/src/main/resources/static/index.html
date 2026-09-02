@@ -40,7 +40,12 @@
         #category { flex: 1 1 160px; }
         #amount { width: 110px; }
         #note { flex: 1 1 100%; }
+        #tag { flex: 1 1 100%; }
         #token { flex: 1 1 100%; }
+        #tagFilter {
+            padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+            background: transparent; color: var(--text); font-size: 13px; flex: 1;
+        }
         button {
             padding: 10px 16px; border: none; border-radius: 8px; cursor: pointer;
             background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
@@ -140,12 +145,19 @@
                 <input id="category" placeholder="Категория (напр. кофе)" required>
                 <input id="amount" placeholder="Сумма" inputmode="decimal" required>
                 <input id="note" placeholder="Заметка (необязательно)">
+                <input id="tag" placeholder="Тег (необязательно, напр. поездка)">
                 <button id="addBtn" type="submit">Добавить трату</button>
             </form>
             <div class="error" id="error"></div>
         </div>
 
         <div class="card" id="budget"></div>
+
+        <!-- Фильтр по тегу: пустой — без фильтра, иначе список запрашивается заново
+             через GET /api/expenses?tag=... (см. load()). -->
+        <div style="display:flex; gap:8px; margin: 0 2px 12px;">
+            <input id="tagFilter" placeholder="Фильтр по тегу">
+        </div>
 
         <div class="periods" id="periods">
             <button type="button" data-period="today">Сегодня</button>
@@ -183,9 +195,11 @@
     const appArea = document.getElementById('appArea');
     const loginError = document.getElementById('loginError');
 
-    let allData = [];            // все траты, как пришли с сервера
+    let allData = [];            // ВСЯ история трат с сервера, без фильтра по периоду/тегу
     let currentPeriod = 'month'; // выбранный период: today | week | month | all
     let budgetValue = null;      // месячный бюджет (null — не задан)
+    let tagFilter = '';          // текущий фильтр по тегу (пусто — без фильтра); только для
+                                  // списка/аналитики, бюджет считается по allData напрямую
 
     // --- Токен доступа хранится в localStorage этого браузера ---
     function getToken() { return localStorage.getItem('apiToken') || ''; }
@@ -272,9 +286,22 @@
         return d >= start;
     }
 
+    // Совпадает ли трата с текущим фильтром по тегу. Пусто — фильтр не задан, проходит всё.
+    // Без учёта регистра — так же, как на сервере GET /api/expenses?tag= (ExpenseRepository.all).
+    function matchesTagFilter(e) {
+        if (!tagFilter) return true;
+        return (e.tag || '').toLowerCase() === tagFilter.toLowerCase();
+    }
+
     async function load() {
         errorEl.textContent = '';
         try {
+            // Всегда грузим ПОЛНУЮ историю (без tag в запросе) — фильтр по тегу применяется
+            // на клиенте, в applyView(), точно так же, как период. Если бы вместо этого мы
+            // запрашивали GET /api/expenses?tag=... и клали результат прямо в allData, карточка
+            // "Бюджет на месяц" (она читает allData напрямую, без tag-фильтра) считала бы
+            // "потрачено за месяц" только по тратам с этим тегом — вводя в заблуждение
+            // (кажется, что бюджет почти не тронут, хотя реально потрачено намного больше).
             const res = await apiFetch(API);
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
@@ -291,9 +318,9 @@
         }
     }
 
-    // Пересчитать и перерисовать всё под выбранный период.
+    // Пересчитать и перерисовать всё под выбранный период И тег (не бюджет — см. load()).
     function applyView() {
-        const data = allData.filter((e) => inPeriod(e.createdAt));
+        const data = allData.filter((e) => inPeriod(e.createdAt) && matchesTagFilter(e));
         renderTotal(data);
         renderBreakdown(data);
         renderTrend(data);
@@ -554,7 +581,7 @@
             <div class="row">
                 <div class="info">
                     <div class="cat">${escapeHtml(e.category)}</div>
-                    <div class="date">${fmtDate(e.createdAt)}${e.categoryGroup ? ' · ' + escapeHtml(e.categoryGroup) : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+                    <div class="date">${fmtDate(e.createdAt)}${e.categoryGroup ? ' · ' + escapeHtml(e.categoryGroup) : ''}${e.tag ? ' · #' + escapeHtml(e.tag) : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
                 </div>
                 <div class="amt">${money(e.amount)} ₽</div>
                 <button class="edit" title="Изменить" data-id="${e.id}">✎</button>
@@ -583,11 +610,16 @@
             errorEl.textContent = 'Введите категорию и сумму больше нуля';
             return;
         }
+        const tagInput = prompt('Тег (пусто — без тега):', e.tag || '');
+        if (tagInput === null) return;
         try {
             const res = await apiFetch(`${API}/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount, category: category.trim(), note: e.note, categoryGroup: null }),
+                body: JSON.stringify({
+                    amount, category: category.trim(), note: e.note, categoryGroup: null,
+                    tag: tagInput.trim() || null,
+                }),
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             load();
@@ -625,6 +657,13 @@
     }
 
     // --- Обработчики ---
+    // Фильтр по тегу — чисто клиентский (applyView() пересчитывает уже загруженные allData),
+    // сеть не трогаем, поэтому без debounce: пересчёт списка мгновенный на любой раскладке.
+    document.getElementById('tagFilter').addEventListener('input', (ev) => {
+        tagFilter = ev.target.value.trim();
+        applyView();
+    });
+
     document.querySelectorAll('#periods button').forEach((btn) => {
         btn.addEventListener('click', () => {
             currentPeriod = btn.dataset.period;
@@ -677,6 +716,7 @@
         const category = document.getElementById('category').value.trim();
         const amountRaw = document.getElementById('amount').value.replace(',', '.');
         const noteRaw = document.getElementById('note').value.trim();
+        const tagRaw = document.getElementById('tag').value.trim();
         const amount = parseFloat(amountRaw);
         if (!category || isNaN(amount) || amount <= 0) {
             errorEl.textContent = 'Введите категорию и сумму больше нуля';
@@ -688,12 +728,13 @@
             const res = await apiFetch(API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount, category, note: noteRaw || null, id: newId() }),
+                body: JSON.stringify({ amount, category, note: noteRaw || null, tag: tagRaw || null, id: newId() }),
             });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             document.getElementById('category').value = '';
             document.getElementById('amount').value = '';
             document.getElementById('note').value = '';
+            document.getElementById('tag').value = '';
             load();
         } catch (e) {
             if (!e.message.includes('401')) errorEl.textContent = 'Не удалось добавить: ' + e.message;

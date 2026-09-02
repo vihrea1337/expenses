@@ -87,7 +87,7 @@ class ExpensesViewModel : ViewModel() {
      * onSuccess вызовется сразу (оптимистично, до всякой сети) — экран очистит поля ввода
      * и увидит новую трату в списке мгновенно, даже без связи.
      */
-    fun addExpense(category: String, amountText: String, note: String?, onSuccess: () -> Unit) {
+    fun addExpense(category: String, amountText: String, note: String?, tag: String?, onSuccess: () -> Unit) {
         // Запятую тоже принимаем как разделитель дробной части (150,5 -> 150.5).
         val amount = amountText.replace(',', '.').toDoubleOrNull()
         if (category.isBlank() || amount == null || amount <= 0) {
@@ -98,8 +98,9 @@ class ExpensesViewModel : ViewModel() {
             ExpensesRepository.addExpenseOptimistic(
                 amount = amount,
                 category = category.trim(),
-                // Пустую заметку не сохраняем (null, а не "").
+                // Пустую заметку/тег не сохраняем (null, а не "").
                 note = note?.trim()?.ifBlank { null },
+                tag = tag?.trim()?.ifBlank { null },
             )
             onSuccess()
             refresh()     // отправить на сервер сразу, если сеть есть; если нет — уйдёт позже
@@ -112,7 +113,7 @@ class ExpensesViewModel : ViewModel() {
      * onSuccess вызывается сразу (оптимистично) — экран увидит правку мгновенно, даже без
      * сети; реальный PUT уйдёт на сервер при следующей синхронизации ([ExpensesRepository.sync]).
      */
-    fun editExpense(id: String, category: String, amountText: String, note: String?, group: String?, onSuccess: () -> Unit) {
+    fun editExpense(id: String, category: String, amountText: String, note: String?, group: String?, tag: String?, onSuccess: () -> Unit) {
         val amount = amountText.replace(',', '.').toDoubleOrNull()
         if (category.isBlank() || amount == null || amount <= 0) {
             _state.update { it.copy(error = "Введите категорию и сумму больше нуля") }
@@ -125,6 +126,7 @@ class ExpensesViewModel : ViewModel() {
                 category = category.trim(),
                 note = note?.trim()?.ifBlank { null },
                 categoryGroup = group,
+                tag = tag?.trim()?.ifBlank { null },
             )
             onSuccess()
             refresh()

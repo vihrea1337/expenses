@@ -42,6 +42,7 @@ import java.util.UUID
 fun main() {
     configureDatabase() // подключиться к базе, создать таблицы, мигрировать старые данные
     startBot()          // Telegram-бот в фоне (если есть токен)
+    TombstoneCleaner.start() // периодическая чистка старых надгробий в фоне
     // Порт и хост можно переопределить переменными окружения. В Docker внутри контейнера
     // надо слушать 0.0.0.0 (иначе проброс порта не достучится); по умолчанию — как раньше,
     // локально на 127.0.0.1:8080.
@@ -99,8 +100,11 @@ fun Application.module() {
 
 /** REST-ручки трат/бюджета. Каждая работает в контексте текущего пользователя (call.userId()). */
 private fun Route.apiRoutes() {
+    // tag — необязательный фильтр по точному совпадению тега (для аналитики "все траты
+    // с тегом Х"); без него — весь список, как раньше.
     get("/api/expenses") {
-        call.respond(ExpenseRepository.all(call.userId()))
+        val tag = call.request.queryParameters["tag"]?.trim()?.ifBlank { null }
+        call.respond(ExpenseRepository.all(call.userId(), tag))
     }
 
     /**
@@ -163,7 +167,7 @@ private fun Route.apiRoutes() {
             return@put
         }
         val body = call.receive<UpdateExpense>()
-        val updated = ExpenseRepository.updateExpense(userId, uuid, body.amount, body.category, body.note, body.categoryGroup)
+        val updated = ExpenseRepository.updateExpense(userId, uuid, body.amount, body.category, body.note, body.categoryGroup, body.tag)
         if (updated == null) {
             call.respond(HttpStatusCode.NotFound)
             return@put
@@ -197,7 +201,7 @@ private fun Route.apiRoutes() {
 internal fun buildCsv(rows: List<Expense>): String {
     val sb = StringBuilder()
     sb.append('﻿') // BOM — метка кодировки UTF-8 для Excel
-    sb.append("Дата;Категория;Сумма;Категория ИИ;Заметка\r\n")
+    sb.append("Дата;Категория;Сумма;Категория ИИ;Тег;Заметка\r\n")
     for (e in rows) {
         val amount = if (e.amount % 1.0 == 0.0) e.amount.toLong().toString() else e.amount.toString()
         val fields = listOf(
@@ -205,6 +209,7 @@ internal fun buildCsv(rows: List<Expense>): String {
             e.category,
             amount,
             e.categoryGroup ?: "",
+            e.tag ?: "",
             e.note ?: "",
         )
         sb.append(fields.joinToString(";") { csvField(it) }).append("\r\n")
@@ -257,6 +262,10 @@ fun configureDatabase() {
 
         // Индекс под запрос синхронизации "что изменилось после такого-то момента".
         exec("CREATE INDEX IF NOT EXISTS expenses_user_id_updated_at ON expenses (user_id, updated_at)")
+
+        // tag — свободный тег для фильтрации/аналитики (2026-09-02). Всегда nullable
+        // (не проставлен по умолчанию), бэкфилл не нужен.
+        exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS tag VARCHAR(50)")
     }
     // Бутстрап "владельца" по API_TOKEN и привязка к нему старых трат/бюджета.
     UserRepository.bootstrapOwnerAndMigrate(System.getenv("API_TOKEN")?.trim())

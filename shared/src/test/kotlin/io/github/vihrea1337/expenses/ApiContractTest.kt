@@ -32,9 +32,19 @@ class ApiContractTest {
 
         val text = jsonWithDefaults.encodeToString(Expense.serializer(), expense)
 
-        for (field in listOf("\"id\"", "\"amount\"", "\"category\"", "\"note\"", "\"createdAt\"", "\"categoryGroup\"")) {
+        for (field in listOf(
+            "\"id\"", "\"amount\"", "\"category\"", "\"note\"", "\"createdAt\"", "\"categoryGroup\"",
+            "\"updatedAt\"", "\"deleted\"", "\"tag\"",
+        )) {
             assertTrue(text.contains(field), "поле $field пропало из JSON: $text")
         }
+    }
+
+    @Test
+    fun `старый ответ сервера без tag разбирается — tag становится null`() {
+        val fromOldServer = """{"id":"e1","amount":100.0,"category":"кофе","createdAt":"2026-08-12T10:00:00"}"""
+        val expense = json.decodeFromString(Expense.serializer(), fromOldServer)
+        assertNull(expense.tag)
     }
 
     @Test

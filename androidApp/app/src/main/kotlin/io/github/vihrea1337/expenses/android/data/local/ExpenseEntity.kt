@@ -33,6 +33,7 @@ data class ExpenseEntity(
     val createdAt: String,
     val updatedAt: String,
     val categoryGroup: String?,
+    val tag: String?,
     val synced: Boolean,
     val dirty: Boolean = false,
     val pendingDelete: Boolean = false,
@@ -47,6 +48,7 @@ fun ExpenseEntity.toExpense() = Expense(
     createdAt = createdAt,
     categoryGroup = categoryGroup,
     updatedAt = updatedAt,
+    tag = tag,
 )
 
 /**
@@ -61,5 +63,6 @@ fun Expense.toEntity(synced: Boolean) = ExpenseEntity(
     createdAt = createdAt,
     updatedAt = updatedAt,
     categoryGroup = categoryGroup,
+    tag = tag,
     synced = synced,
 )

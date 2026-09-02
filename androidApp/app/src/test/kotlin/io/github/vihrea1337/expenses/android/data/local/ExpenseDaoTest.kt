@@ -44,6 +44,7 @@ class ExpenseDaoTest {
         amount: Double = 100.0,
         dirty: Boolean = false,
         pendingDelete: Boolean = false,
+        tag: String? = null,
     ) = ExpenseEntity(
         id = id,
         amount = amount,
@@ -52,6 +53,7 @@ class ExpenseDaoTest {
         createdAt = "2026-09-02T10:00:00",
         updatedAt = "2026-09-02T10:00:00",
         categoryGroup = null,
+        tag = tag,
         synced = synced,
         dirty = dirty,
         pendingDelete = pendingDelete,
@@ -145,6 +147,7 @@ class ExpenseDaoTest {
             createdAt = "2026-09-02T10:00:00",
             categoryGroup = "транспорт",
             updatedAt = "2026-09-02T10:05:00",
+            tag = "поездка",
         )
         val roundTripped = original.toEntity(synced = true).toExpense()
         assertEquals(original, roundTripped)

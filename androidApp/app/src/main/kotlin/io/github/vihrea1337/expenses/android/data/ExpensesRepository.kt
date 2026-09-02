@@ -60,7 +60,7 @@ object ExpensesRepository {
     }
 
     /** Добавить трату немедленно в локальный кэш со своим id — экран обновится через Flow. */
-    suspend fun addExpenseOptimistic(amount: Double, category: String, note: String?) {
+    suspend fun addExpenseOptimistic(amount: Double, category: String, note: String?, tag: String?) {
         val now = LocalDateTime.now().toString()
         dao.upsert(
             ExpenseEntity(
@@ -71,6 +71,7 @@ object ExpensesRepository {
                 createdAt = now,
                 updatedAt = now,
                 categoryGroup = null,
+                tag = tag,
                 synced = false,
             ),
         )
@@ -81,7 +82,14 @@ object ExpensesRepository {
      * правка просто меняет то, что уйдёт вместе с ещё не отправленным POST, без отдельного PUT.
      * Если уже видел — помечаем dirty, чтобы [pushDirty] отправил PUT при следующей sync().
      */
-    suspend fun editExpenseOptimistic(id: String, amount: Double, category: String, note: String?, categoryGroup: String?) {
+    suspend fun editExpenseOptimistic(
+        id: String,
+        amount: Double,
+        category: String,
+        note: String?,
+        categoryGroup: String?,
+        tag: String?,
+    ) {
         val existing = dao.getById(id) ?: return
         dao.upsert(
             existing.copy(
@@ -89,6 +97,7 @@ object ExpensesRepository {
                 category = category,
                 note = note,
                 categoryGroup = categoryGroup,
+                tag = tag,
                 updatedAt = LocalDateTime.now().toString(),
                 dirty = existing.synced,
             ),
@@ -130,7 +139,13 @@ object ExpensesRepository {
             try {
                 val saved = ApiClient.api.editExpense(
                     row.id,
-                    UpdateExpense(amount = row.amount, category = row.category, note = row.note, categoryGroup = row.categoryGroup),
+                    UpdateExpense(
+                        amount = row.amount,
+                        category = row.category,
+                        note = row.note,
+                        categoryGroup = row.categoryGroup,
+                        tag = row.tag,
+                    ),
                 )
                 dao.upsert(saved.toEntity(synced = true))
             } catch (e: Exception) {
@@ -148,6 +163,7 @@ object ExpensesRepository {
                         category = pending.category,
                         note = pending.note,
                         id = pending.id, // тот же id — сервер узнает повтор и не создаст дубль
+                        tag = pending.tag,
                     ),
                 )
                 dao.upsert(saved.toEntity(synced = true))

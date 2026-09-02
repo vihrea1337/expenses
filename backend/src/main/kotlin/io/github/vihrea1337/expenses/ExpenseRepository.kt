@@ -3,9 +3,12 @@ package io.github.vihrea1337.expenses
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -27,13 +30,18 @@ object ExpenseRepository {
         categoryGroup = row[Expenses.categoryGroup],
         updatedAt = row[Expenses.updatedAt].toString(),
         deleted = row[Expenses.deletedAt] != null,
+        tag = row[Expenses.tag],
     )
 
-    /** Все (не удалённые) траты пользователя. */
-    fun all(userId: UUID): List<Expense> = transaction {
-        Expenses.selectAll()
-            .where { (Expenses.userId eq userId) and Expenses.deletedAt.isNull() }
-            .map(::rowToExpense)
+    /**
+     * Все (не удалённые) траты пользователя. [tag] — необязательный фильтр: совпадение без
+     * учёта регистра (пользователь мог однажды напечатать "Поездка", а в другой раз "поездка" —
+     * это один и тот же тег, а не два разных).
+     */
+    fun all(userId: UUID, tag: String? = null): List<Expense> = transaction {
+        val q = Expenses.selectAll().where { (Expenses.userId eq userId) and Expenses.deletedAt.isNull() }
+        if (tag != null) q.andWhere { Expenses.tag.lowerCase() eq tag.lowercase() }
+        q.map(::rowToExpense)
     }
 
     /**
@@ -71,6 +79,7 @@ object ExpenseRepository {
             it[Expenses.createdAt] = now
             it[Expenses.updatedAt] = now
             it[Expenses.userId] = userId
+            it[Expenses.tag] = new.tag
         }
         Expense(
             id = id.toString(),
@@ -79,6 +88,7 @@ object ExpenseRepository {
             note = new.note,
             createdAt = now.toString(),
             updatedAt = now.toString(),
+            tag = new.tag,
         )
     }
 
@@ -112,6 +122,7 @@ object ExpenseRepository {
         category: String,
         note: String?,
         categoryGroup: String?,
+        tag: String?,
     ): Expense? = transaction {
         val changed = Expenses.update({
             (Expenses.id eq id) and (Expenses.userId eq userId) and Expenses.deletedAt.isNull()
@@ -120,6 +131,7 @@ object ExpenseRepository {
             it[Expenses.category] = category
             it[Expenses.note] = note
             it[Expenses.categoryGroup] = categoryGroup
+            it[Expenses.tag] = tag
             it[Expenses.updatedAt] = LocalDateTime.now()
         }
         if (changed == 0) return@transaction null
@@ -153,5 +165,16 @@ object ExpenseRepository {
         q.orderBy(Expenses.updatedAt to SortOrder.ASC)
             .limit(limit)
             .map(::rowToExpense)
+    }
+
+    /**
+     * Окончательно стереть надгробия (мягко удалённые траты), у которых deleted_at старше
+     * [threshold]. Вызывается периодически из [TombstoneCleaner]. Живые траты (deleted_at
+     * IS NULL) под условие не подпадают сами по себе: в SQL "NULL < threshold" — не TRUE,
+     * а NULL, так что в WHERE такая строка не проходит, отдельная проверка на IS NOT NULL
+     * не нужна. Возвращает, сколько строк стёрто физически.
+     */
+    fun deleteTombstonesOlderThan(threshold: LocalDateTime): Int = transaction {
+        Expenses.deleteWhere { Expenses.deletedAt less threshold }
     }
 }
