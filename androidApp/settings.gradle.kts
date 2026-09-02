@@ -18,3 +18,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "ExpensesAndroid"
 include(":app")
+
+// includeBuild подключает соседний Gradle-проект (общие DTO с бэкендом) как обычную зависимость.
+includeBuild("../shared")

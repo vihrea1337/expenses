@@ -66,7 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import io.github.vihrea1337.expenses.android.data.Expense
+import io.github.vihrea1337.expenses.Expense
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter

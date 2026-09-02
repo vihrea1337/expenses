@@ -29,6 +29,9 @@ repositories {
 }
 
 dependencies {
+    // Общий модуль моделей (DTO) — тот же контракт, что и в Android-приложении.
+    implementation("io.github.vihrea1337.expenses:shared:1.0")
+
     // Ядро Ktor + сам HTTP-сервер (движок Netty).
     implementation("io.ktor:ktor-server-core")
     implementation("io.ktor:ktor-server-netty")

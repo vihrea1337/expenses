@@ -62,6 +62,9 @@ kotlin {
 }
 
 dependencies {
+    // Общий модуль моделей (DTO) — тот же контракт, что и на бэкенде.
+    implementation("io.github.vihrea1337.expenses:shared:1.0")
+
     // Compose BOM — "спецификация версий": он сам подбирает согласованные версии всех compose-библиотек,
     // поэтому у отдельных compose-зависимостей версию не указываем.
     val composeBom = platform("androidx.compose:compose-bom:2025.06.01")

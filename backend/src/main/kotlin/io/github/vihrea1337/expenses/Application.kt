@@ -219,32 +219,12 @@ fun configureDatabase() {
     UserRepository.bootstrapOwnerAndMigrate(System.getenv("API_TOKEN")?.trim())
 }
 
+// Expense, NewExpense, UpdateExpense, BudgetDto, RegisterRequest, UserResponse, MeResponse —
+// в общем модуле shared/ (тот же пакет, поэтому импорт не нужен): один контракт на бэкенд
+// и Android-приложение.
+
 @Serializable
 data class HealthResponse(val status: String)
 
 @Serializable
-data class BudgetDto(val monthlyBudget: Double? = null)
-
-@Serializable
 data class ReclassifyResult(val pending: Int)
-
-/** Тело PUT /api/expenses/{id}: categoryGroup = null → переопределить ИИ, иначе ручная категория. */
-@Serializable
-data class UpdateExpense(
-    val amount: Double,
-    val category: String,
-    val note: String? = null,
-    val categoryGroup: String? = null,
-)
-
-/** Тело регистрации: имя пользователя. */
-@Serializable
-data class RegisterRequest(val name: String = "")
-
-/** Ответ регистрации: токен доступа и имя. */
-@Serializable
-data class UserResponse(val token: String, val name: String)
-
-/** Ответ /api/me: кто я. */
-@Serializable
-data class MeResponse(val name: String)

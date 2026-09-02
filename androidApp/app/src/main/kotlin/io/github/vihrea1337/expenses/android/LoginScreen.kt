@@ -20,8 +20,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.vihrea1337.expenses.RegisterRequest
 import io.github.vihrea1337.expenses.android.data.ApiClient
-import io.github.vihrea1337.expenses.android.data.RegisterRequest
 import kotlinx.coroutines.launch
 
 /**

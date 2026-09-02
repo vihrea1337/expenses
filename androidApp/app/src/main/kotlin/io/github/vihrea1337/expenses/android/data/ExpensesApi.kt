@@ -1,5 +1,12 @@
 package io.github.vihrea1337.expenses.android.data
 
+import io.github.vihrea1337.expenses.BudgetDto
+import io.github.vihrea1337.expenses.Expense
+import io.github.vihrea1337.expenses.MeResponse
+import io.github.vihrea1337.expenses.NewExpense
+import io.github.vihrea1337.expenses.RegisterRequest
+import io.github.vihrea1337.expenses.UpdateExpense
+import io.github.vihrea1337.expenses.UserResponse
 import io.github.vihrea1337.expenses.android.TokenStore
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType

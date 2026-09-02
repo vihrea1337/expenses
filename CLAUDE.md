@@ -27,25 +27,30 @@ Expenses/
 ├── CLAUDE.md            ← этот файл
 ├── README.md
 ├── docs/                ← архитектура и план
-├── backend/            ← серверная часть на Ktor (готов каркас)
+├── backend/            ← серверная часть на Ktor
 │   └── src/main/kotlin/io/github/vihrea1337/expenses/Application.kt
-└── androidApp/         ← Android-приложение (появится позже)
+├── androidApp/         ← Android-приложение
+└── shared/             ← общий модуль DTO (контракт API) для backend и androidApp,
+                           подключается через includeBuild (см. architecture.md)
 ```
 
 ## Бэкенд: команды
-Из папки `backend/` (JDK берём из Android Studio):
+Из папки `backend/`:
 ```powershell
-$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
 .\gradlew.bat run          # запустить локально на http://127.0.0.1:8080
 .\gradlew.bat build        # собрать и проверить
 .\gradlew.bat buildFatJar  # собрать один jar для деплоя: build/libs/expenses-backend-all.jar
 ```
 Проверка живости: `http://127.0.0.1:8080/health` → `{"status":"ok"}`.
 
+_JDK строго 21: JBR Android Studio на новых версиях (2026.1+) бывает свежее (25) и с ним
+Gradle 8.14.3/AGP не собираются — ставь отдельный JDK 21 (Eclipse Temurin), если его нет._
+
 ## Ключевые факты
 - Package: `io.github.vihrea1337.expenses`. GitHub: https://github.com/vihrea1337/expenses (**private**).
-- Тулчейн бэкенда: **Kotlin 2.1.0**, **Ktor 3.0.3**, **Gradle 8.14.3** (wrapper), **JDK 21** (JBR Android Studio).
-- Хранилище (планируется): **PostgreSQL** через **Exposed**; JSON — kotlinx.serialization.
+- Тулчейн бэкенда: **Kotlin 2.1.0**, **Ktor 3.0.3**, **Gradle 8.14.3** (wrapper), **JDK 21** (Eclipse Temurin — см. выше).
+- Хранилище: **PostgreSQL** через **Exposed**; JSON — kotlinx.serialization.
 
 ## Текущее состояние (кратко)
 **v1.1 готова и развёрнута.** Три клиента (Android, Telegram-бот, веб-страница) к одному Ktor-бэкенду на VPS с PostgreSQL. Реализовано: быстрый ввод, REST API, **мультипользовательские аккаунты** (токен = аккаунт, изоляция; бот `/token`·`/link`), авторизация bearer-токеном, аналитика по категориям (donut) и **график по времени**, месячный бюджет, ИИ-категоризация трат (Groq), **экспорт CSV**, бот-меню (`setMyCommands`), тесты+CI (парсер, CSV, репозитории на H2). Детали — в `README.md` и `docs/`.
