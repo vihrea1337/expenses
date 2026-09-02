@@ -1,9 +1,10 @@
 package io.github.vihrea1337.expenses
 
 import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -24,11 +25,15 @@ object ExpenseRepository {
         note = row[Expenses.note],
         createdAt = row[Expenses.createdAt].toString(),
         categoryGroup = row[Expenses.categoryGroup],
+        updatedAt = row[Expenses.updatedAt].toString(),
+        deleted = row[Expenses.deletedAt] != null,
     )
 
-    /** Все траты пользователя. */
+    /** Все (не удалённые) траты пользователя. */
     fun all(userId: UUID): List<Expense> = transaction {
-        Expenses.selectAll().where { Expenses.userId eq userId }.map(::rowToExpense)
+        Expenses.selectAll()
+            .where { (Expenses.userId eq userId) and Expenses.deletedAt.isNull() }
+            .map(::rowToExpense)
     }
 
     /**
@@ -64,6 +69,7 @@ object ExpenseRepository {
             it[Expenses.category] = new.category
             it[Expenses.note] = new.note
             it[Expenses.createdAt] = now
+            it[Expenses.updatedAt] = now
             it[Expenses.userId] = userId
         }
         Expense(
@@ -72,15 +78,33 @@ object ExpenseRepository {
             category = new.category,
             note = new.note,
             createdAt = now.toString(),
+            updatedAt = now.toString(),
         )
     }
 
-    /** Удалить трату пользователя по id (чужую не удалит — есть условие по userId). */
+    /**
+     * Удалить трату пользователя по id (чужую не удалит — есть условие по userId).
+     *
+     * Мягкое удаление: строка не стирается, а помечается deleted_at + updated_at. Причина —
+     * синхронизация: без "надгробия" офлайн-клиент, который не видел удаления, узнать о нём
+     * никогда не сможет и "воскресит" трату при следующей синхронизации (см. changesSince).
+     * Заметку чистим сразу (свободный текст — самое чувствительное в записи); категорию и
+     * сумму оставляем как есть — в отличие от, например, дневниковых записей, здесь они не
+     * настолько чувствительны, чтобы усложнять миграцию ради их обнуления.
+     *
+     * Повторное удаление уже удалённой траты (deletedAt.isNull() в условии) возвращает false —
+     * так же, как раньше для несуществующей записи.
+     */
     fun delete(userId: UUID, id: UUID): Boolean = transaction {
-        Expenses.deleteWhere { (Expenses.id eq id) and (Expenses.userId eq userId) } > 0
+        val now = LocalDateTime.now()
+        Expenses.update({ (Expenses.id eq id) and (Expenses.userId eq userId) and Expenses.deletedAt.isNull() }) {
+            it[deletedAt] = now
+            it[updatedAt] = now
+            it[note] = null
+        } > 0
     }
 
-    /** Отредактировать трату пользователя. Вернёт обновлённую трату или null, если её нет. */
+    /** Отредактировать трату пользователя. Вернёт обновлённую трату или null, если её нет (или она удалена). */
     fun updateExpense(
         userId: UUID,
         id: UUID,
@@ -89,11 +113,14 @@ object ExpenseRepository {
         note: String?,
         categoryGroup: String?,
     ): Expense? = transaction {
-        val changed = Expenses.update({ (Expenses.id eq id) and (Expenses.userId eq userId) }) {
+        val changed = Expenses.update({
+            (Expenses.id eq id) and (Expenses.userId eq userId) and Expenses.deletedAt.isNull()
+        }) {
             it[Expenses.amount] = amount.toBigDecimal()
             it[Expenses.category] = category
             it[Expenses.note] = note
             it[Expenses.categoryGroup] = categoryGroup
+            it[Expenses.updatedAt] = LocalDateTime.now()
         }
         if (changed == 0) return@transaction null
         Expenses.selectAll().where { Expenses.id eq id }.first().let(::rowToExpense)
@@ -101,15 +128,30 @@ object ExpenseRepository {
 
     /** Проставить обобщённую категорию (её вычислил ИИ) конкретной трате по id. */
     fun updateGroup(id: UUID, group: String) = transaction {
-        Expenses.update({ Expenses.id eq id }) {
+        Expenses.update({ (Expenses.id eq id) and Expenses.deletedAt.isNull() }) {
             it[categoryGroup] = group
+            it[updatedAt] = LocalDateTime.now()
         }
     }
 
-    /** Траты пользователя без категории — пары (id, описание) для переклассификации. */
+    /** Траты пользователя без категории (и не удалённые) — пары (id, описание) для переклассификации. */
     fun expensesWithoutGroup(userId: UUID): List<Pair<UUID, String>> = transaction {
         Expenses.selectAll()
-            .where { (Expenses.userId eq userId) and Expenses.categoryGroup.isNull() }
+            .where { (Expenses.userId eq userId) and Expenses.categoryGroup.isNull() and Expenses.deletedAt.isNull() }
             .map { it[Expenses.id] to it[Expenses.category] }
+    }
+
+    /**
+     * Что изменилось после момента [since] — основа синхронизации офлайн-клиентов. Отдаёт и
+     * обычные траты, и "надгробия" удалённых (`deleted = true` в DTO), по возрастанию
+     * updatedAt: клиент запоминает время последней полученной записи и в следующий раз
+     * просит только то, что новее.
+     */
+    fun changesSince(userId: UUID, since: LocalDateTime?, limit: Int): List<Expense> = transaction {
+        val q = Expenses.selectAll().where { Expenses.userId eq userId }
+        if (since != null) q.andWhere { Expenses.updatedAt greater since }
+        q.orderBy(Expenses.updatedAt to SortOrder.ASC)
+            .limit(limit)
+            .map(::rowToExpense)
     }
 }

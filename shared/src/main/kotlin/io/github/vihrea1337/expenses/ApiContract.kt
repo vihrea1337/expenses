@@ -35,6 +35,14 @@ data class Expense(
     val createdAt: String,
     // Обобщённая категория от ИИ ("еда", ...); null, пока не проставлена.
     val categoryGroup: String? = null,
+    // Когда запись последний раз менялась (создание/правка/мягкое удаление) — основа
+    // синхронизации офлайн-клиентов (GET /api/expenses/changes?since=). "" — дефолт на случай
+    // разбора ответа от версии сервера без этого поля (контракт обязан быть терпим к
+    // недостающим полям, даже если на практике такой версии уже не осталось).
+    val updatedAt: String = "",
+    // Мягкое удаление: true — это "надгробие". Из обычного GET /api/expenses такие не
+    // приходят (сервер их фильтрует); появляются только в /api/expenses/changes.
+    val deleted: Boolean = false,
 )
 
 /** Тело POST /api/expenses: трата, которую клиент ОТПРАВЛЯЕТ на сервер. */
@@ -62,6 +70,19 @@ data class UpdateExpense(
     val category: String,
     val note: String? = null,
     val categoryGroup: String? = null,
+)
+
+/**
+ * Ответ синхронизации (GET /api/expenses/changes?since=&limit=): изменения по возрастанию
+ * updatedAt + время сервера. Клиент запоминает serverTime из ответа и в следующий раз
+ * присылает его как since — качать всю историю заново не нужно.
+ */
+@Serializable
+data class ExpensesChangesDto(
+    val expenses: List<Expense>,
+    val serverTime: String,
+    /** true — упёрлись в лимит страницы, нужно запросить следующую порцию с новым since. */
+    val hasMore: Boolean,
 )
 
 /** Месячный бюджет. monthlyBudget = null означает "бюджет не задан". */

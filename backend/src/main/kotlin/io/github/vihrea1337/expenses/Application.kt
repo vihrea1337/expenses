@@ -103,6 +103,31 @@ private fun Route.apiRoutes() {
         call.respond(ExpenseRepository.all(call.userId()))
     }
 
+    /**
+     * Синхронизация: что изменилось после момента `since` (включая мягко удалённые записи —
+     * у них deleted = true). Клиент запоминает serverTime из ответа и в следующий раз
+     * присылает его как since — качать всю историю заново не нужно.
+     */
+    get("/api/expenses/changes") {
+        val sinceRaw = call.request.queryParameters["since"]
+        val since = sinceRaw?.takeIf { it.isNotBlank() }?.let {
+            runCatching { java.time.LocalDateTime.parse(it) }.getOrNull()
+                ?: return@get call.respond(
+                    HttpStatusCode.BadRequest,
+                    "Некорректный since: нужен момент времени вида 2026-08-12T10:00:00",
+                )
+        }
+        val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: 200).coerceIn(1, 500)
+        val changes = ExpenseRepository.changesSince(call.userId(), since, limit)
+        call.respond(
+            ExpensesChangesDto(
+                expenses = changes,
+                serverTime = java.time.LocalDateTime.now().toString(),
+                hasMore = changes.size == limit,
+            ),
+        )
+    }
+
     // Выгрузка всех трат пользователя в CSV-файл (открывается в Excel/Google Таблицах).
     get("/api/expenses.csv") {
         val rows = ExpenseRepository.all(call.userId()).sortedByDescending { it.createdAt }
@@ -214,6 +239,24 @@ fun configureDatabase() {
         // Новые столбцы для существующей таблицы expenses (create их не добавляет).
         exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category_group VARCHAR(50)")
         exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS user_id UUID")
+
+        // updated_at — для синхронизации офлайн-клиентов (2026-09-02). На старых строках его
+        // никогда не было: сначала добавляем колонку разрешающей NULL, бэкфиллим лучшим
+        // доступным приближением (created_at — момент создания и есть последнее известное
+        // изменение для записей, которые с тех пор не правили), и только потом запрещаем
+        // NULL — так миграция не падает на уже существующих данных. ADD COLUMN и повторный
+        // SET NOT NULL безопасно выполнять и на пустой базе, и при каждом следующем запуске
+        // (IF NOT EXISTS / уже NOT NULL — Postgres не ругается).
+        exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP")
+        exec("UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL")
+        exec("ALTER TABLE expenses ALTER COLUMN updated_at SET NOT NULL")
+
+        // deleted_at — мягкое удаление ("надгробие"), см. Expenses.kt и ExpenseRepository.delete.
+        // Остаётся NULL всегда, кроме удалённых строк — бэкфилл не нужен.
+        exec("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+
+        // Индекс под запрос синхронизации "что изменилось после такого-то момента".
+        exec("CREATE INDEX IF NOT EXISTS expenses_user_id_updated_at ON expenses (user_id, updated_at)")
     }
     // Бутстрап "владельца" по API_TOKEN и привязка к нему старых трат/бюджета.
     UserRepository.bootstrapOwnerAndMigrate(System.getenv("API_TOKEN")?.trim())
