@@ -104,6 +104,9 @@ groq.api.key=<ключ Groq>
 - [`docs/roadmap.md`](docs/roadmap.md) — план по срезам и статус.
 - [`docs/deploy.md`](docs/deploy.md) — как развёрнут бэкенд на VPS.
 - [`docs/backup.md`](docs/backup.md) — бэкапы базы данных (pg_dump, cron).
+- [`docs/gost/`](docs/gost/) — формальный пакет документации по ГОСТ 34 (ТЗ, пояснительная
+  записка, руководства пользователя и администратора) + `expenses-gost-documentation.docx`
+  в корне репозитория для сдачи.
 
 ## Приватность
 
