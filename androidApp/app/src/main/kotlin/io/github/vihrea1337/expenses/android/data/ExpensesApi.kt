@@ -82,9 +82,9 @@ interface ExpensesApi {
  */
 object ApiClient {
     // Адрес нашего бэкенда. Должен оканчиваться на "/".
-    // Порт 34443 — потому что на новом сервере Caddy отдаёт HTTPS на этом порту
-    // (80/443 там заняты). Если переедем — меняем только эту строку.
-    private const val BASE_URL = "https://sashlevhealth.duckdns.org:34443/"
+    // Переезд на новый сервер (2026-09-15): свой nginx на стандартном 443, без
+    // отдельного порта. Если переедем снова — меняем только эту строку.
+    private const val BASE_URL = "https://vihreaexpenses.duckdns.org/"
 
     val api: ExpensesApi by lazy {
         // ignoreUnknownKeys = true — если сервер пришлёт лишние поля, не падаем.

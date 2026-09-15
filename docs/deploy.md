@@ -1,78 +1,66 @@
-# Деплой на VPS — как реально устроено (факт на 2026-07-16)
+# Деплой на VPS — как реально устроено (факт на 2026-09-15)
 
-Документ фиксирует, **как бэкенд Expenses развёрнут на VPS**, чтобы будущие правки не сломали соседей (VPN, сайт). Все серверные шаги делает пользователь по SSH; у Claude доступа к серверу нет.
+Документ фиксирует, **как бэкенд Expenses развёрнут на VPS**, чтобы будущие правки не сломали соседей (VPN). Историю переезда (старый сервер, старый домен) см. в конце файла.
 
 ## Что на сервере
 
-- **ОС:** Ubuntu 24.04, вход под `root`. Публичный IP `89.125.30.242`.
-- **Это docker-compose стек** в `/root/vpn/vpn-stack` (репозиторий VPN-стенда, отдельный от Expenses). Контейнеры:
-  | Контейнер | Образ | Роль |
-  |---|---|---|
-  | `nginx-proxy` | `nginx:stable` | reverse-proxy, **`network_mode: host`**, держит порты 80/443 |
-  | `portfolio-web-1` | `portfolio-web` | сайт пользователя, слушает `127.0.0.1:3000` |
-  | `3x-ui` + `xray` | `mhsanaei/3x-ui` | VPN (Xray Reality), панель управления |
-
-- **`nginx-proxy` работает в host-сети** — поэтому для него `127.0.0.1` = loopback самого сервера. Отсюда он проксирует на `127.0.0.1:3000` (сайт), `127.0.0.1:8443` (Xray) и `127.0.0.1:8080` (наш Ktor). Наш бэкенд поэтому НЕ нужно докеризовать: он крутится на хосте, и nginx его видит напрямую.
-
-## Как nginx на 443 разводит трафик
-
-Порт 443 обслуживается в два слоя (файл `/root/vpn/vpn-stack/reverse-proxy/nginx.conf`, **правится руками** — bootstrap.sh его не генерирует):
-
-1. `stream {}` + `ssl_preread` — читает имя домена (SNI) **не расшифровывая TLS** и маршрутизирует:
-   - SNI `yandex.ru` → Xray (`127.0.0.1:8443`) — маскировка VPN;
-   - всё остальное → `site_tls` (`127.0.0.1:8081`).
-2. `http {}` на `127.0.0.1:8081 ssl` — терминирует TLS и по `server_name` выбирает бэкенд:
-   - `sashlev.duckdns.org` → сайт (`127.0.0.1:3000`);
-   - `sashlevhealth.duckdns.org` → **наш Ktor** (`127.0.0.1:8080`).
-
-Наш поддомен попадает в ветку «всё остальное», поэтому VPN-блок трогать не нужно.
+- **ОС:** Ubuntu 24.04, вход под `root`. Публичный IP `130.49.176.80`.
+- Это слабый сервер (диск ~8.7 ГБ) — на нём **только** VPN (Xray VLESS+WS, контейнер `vless-ws-piter-ip`, TLS для него терминирует внешний Nginx Proxy Manager в Питере, `films.litra.su` — не трогать) и Expenses. Больше ничего — сервер держится «чистым» специально.
+- Expenses НЕ докеризован (кроме БД): бэкенд — обычный systemd-сервис на хосте, слушает `127.0.0.1:8080`; перед ним — **свой** nginx (не общий стек, как было раньше), сам терминирует TLS для домена Expenses.
+- **Postgres** — в docker, контейнер `expenses-pg` (`postgres:16-alpine`), слушает `127.0.0.1:5432`, том `expenses_pgdata`.
 
 ## Наш бэкенд
 
-- **Домен:** `sashlevhealth.duckdns.org` (DuckDNS → `89.125.30.242`).
+- **Домен:** `vihreaexpenses.duckdns.org` (DuckDNS → `130.49.176.80`).
 - **jar:** `/opt/expenses/expenses-backend-all.jar` (заливается через `scp` с ПК; владелец — служебный пользователь `expenses`).
-- **Служба:** `systemd` юнит `/etc/systemd/system/expenses-backend.service` — `User=expenses`, `ExecStart=/usr/bin/java -jar /opt/expenses/expenses-backend-all.jar`, `Restart=on-failure`. Слушает `127.0.0.1:8080`.
-- **TLS:** Let's Encrypt, выпущен `certbot certonly --webroot -w /root/vpn/vpn-stack/reverse-proxy/certbot/www -d sashlevhealth.duckdns.org --deploy-hook "docker exec nginx-proxy nginx -s reload"`. Автопродление — `certbot.timer`, сертификаты в `/etc/letsencrypt/live/sashlevhealth.duckdns.org/`.
-- **nginx-блок:** один `server { listen 127.0.0.1:8081 ssl; server_name sashlevhealth.duckdns.org; ... proxy_pass http://127.0.0.1:8080; }` в `reverse-proxy/nginx.conf`.
+- **Секреты:** `/etc/expenses/expenses.env` (chmod 600) — `DB_URL`, `DB_USER`, `DB_PASSWORD`, `BOT_TOKEN`, `API_TOKEN`. `GROQ_API_KEY` пока не задан — ИИ-категоризация не работает, всё остальное работает (это ожидаемо, см. `architecture.md`).
+- **Служба:** `systemd`-юнит `/etc/systemd/system/expenses-backend.service` — `User=expenses`, `ExecStart=/usr/bin/java -jar /opt/expenses/expenses-backend-all.jar`, `Restart=on-failure`. Слушает `127.0.0.1:8080`.
+- **nginx:** свой конфиг `/etc/nginx/sites-available/expenses` (симлинк в `sites-enabled`) — `server_name vihreaexpenses.duckdns.org`, `proxy_pass http://127.0.0.1:8080`. Отдельный от VPN — тот наружу не через локальный nginx (см. выше).
+- **TLS:** Let's Encrypt через `certbot --nginx` (сам правит конфиг nginx, добавляет `listen 443 ssl` и редирект с 80). Автопродление — `certbot.timer` (systemd, уже включён).
+- **Бот:** long-polling (не webhook) — доменом/сертификатом для бота не пользуется, только для REST API приложения/веб-страницы.
 
 ## Порядок обновления бэкенда (когда jar изменится)
 
 1. На ПК: `buildFatJar` → `expenses-backend-all.jar`.
-2. `scp` его в `/opt/expenses/` (можно во временное имя, потом `mv`).
+2. `scp` его в `/opt/expenses/` (владелец должен остаться `expenses:expenses`, `chown` после копирования).
 3. На сервере: `systemctl restart expenses-backend` → проверить `curl -s http://127.0.0.1:8080/health`.
 
 ## Как безопасно менять nginx.conf
 
-1. Бэкап: `cp reverse-proxy/nginx.conf reverse-proxy/nginx.conf.bak`.
-2. **Не пастить большой конфиг в SSH-терминал** — вставка искажается. Готовить файл на ПК и слать `scp` во временное имя, затем `cat tmp > nginx.conf` (перезапись **на месте** сохраняет inode, иначе host-bind-mount контейнера не увидит новый файл).
-3. Проверять и **синтаксис, и структуру**: `docker exec nginx-proxy nginx -t` (синтаксис) + `grep -nE 'stream \{|http \{|server_name' nginx.conf` (что http-блок и все server_name на месте — `nginx -t` проходит даже без http-блока!).
-4. Применить: `docker exec nginx-proxy nginx -s reload` (мягкий, соединения не рвёт; при ошибке не применяется).
-5. Проверить: `curl -s https://sashlevhealth.duckdns.org/health` и что сайт отдаёт 200.
+1. Бэкап: `cp /etc/nginx/sites-available/expenses /etc/nginx/sites-available/expenses.bak`.
+2. Править прямо на сервере (конфиг маленький, свой, без общего стека — в отличие от старой схемы, тут не нужно готовить файл на ПК и слать `scp`).
+3. Проверить: `nginx -t`.
+4. Применить: `systemctl reload nginx` (мягкий, соединения не рвёт; при ошибке `nginx -t` не даст применить битый конфиг).
+5. Проверить: `curl -s https://vihreaexpenses.duckdns.org/health`.
 
-## Перенос на новый сервер (с нуля)
+## Доступ Claude к серверу (изменение политики, 2026-09-15)
 
+**До 2026-09-15** в `CLAUDE.md` было написано «у Claude доступа к VPS нет» — серверные шаги пользователь выполнял сам по инструкциям. **Пользователь явно решил это изменить** для переезда на новый сервер: сгенерирован отдельный ed25519 SSH-ключ, публичная часть добавлена в `/root/.ssh/authorized_keys` на `130.49.176.80`. С этого момента Claude может сам заходить по SSH на **этот** сервер и выполнять серверные операции напрямую (что и сделано: диагностика, бэкап, чистка, установка Java/nginx/certbot/Postgres, деплой jar, nginx+сертификат — всё выполнено Claude по SSH в этой сессии, без передачи команд пользователю). Ключ лежит локально на ПК пользователя (не в git); приватная часть Claude не публикуется.
+
+---
+
+## История переезда (что было раньше)
+
+### Старый сервер Expenses (утрачен, факт до 2026-09-15)
+Раньше бэкенд жил на `89.125.30.242` (домен `sashlevhealth.duckdns.org`), в общем docker-compose стеке `vpn-stack` с VPN (3x-ui/Xray Reality) и сайтом-визиткой — один nginx на 443 разводил трафик по SNI. **Доступ к этому серверу утрачен** (просрочен) до того, как был сделан бэкап БД — реальные траты и аккаунты, накопленные там, **не восстановлены**, на новом сервере база создана с нуля. Сайт-визитку решили не переносить вообще.
+
+### Перенос на новый сервер (с нуля) — актуальная инструкция
 Готовые артефакты — в папке [`deploy/`](../deploy):
 
 | Файл | Назначение |
 |---|---|
 | `deploy/expenses.env.example` | шаблон секретов → `/etc/expenses/expenses.env` |
 | `deploy/expenses-backend.service` | systemd-юнит (с `EnvironmentFile`) → `/etc/systemd/system/` |
-| `deploy/nginx-expenses.conf` | server-блок nginx (справочно; на бою он в `vpn-stack`) |
+| `deploy/nginx-expenses.conf` | справочный server-блок под **старую** схему (общий стек с SNI-роутером) — на факте 2026-09-15 использован свой отдельный конфиг, см. выше |
 
-Нужны также (в зашифрованном бэкапе, **не в git**): `expenses.env` с реальными значениями и
-дамп БД `expenses-db.sql` (`pg_dump -U postgres expenses`).
-
-Шаги на чистом сервере:
+Шаги на чистом сервере (то, что реально было сделано 2026-09-15):
 ```bash
-# 1) PostgreSQL в docker (пароль = DB_PASSWORD из expenses.env)
+# 1) Postgres в docker
 docker run -d --name expenses-pg --restart unless-stopped \
   -e POSTGRES_PASSWORD=<пароль> -e POSTGRES_DB=expenses \
-  -p 127.0.0.1:5432:5432 -v expenses_pgdata:/var/lib/postgresql/data postgres:16
+  -p 127.0.0.1:5432:5432 -v expenses_pgdata:/var/lib/postgresql/data postgres:16-alpine
 
-# 2) Восстановить данные из дампа
-cat expenses-db.sql | docker exec -i expenses-pg psql -U postgres expenses
-
-# 3) Секреты, jar, служба
+# 2) Секреты, jar, служба
 mkdir -p /etc/expenses /opt/expenses
 cp expenses.env /etc/expenses/ && chmod 600 /etc/expenses/expenses.env
 cp expenses-backend-all.jar /opt/expenses/      # собрать: ./gradlew buildFatJar
@@ -82,7 +70,10 @@ chown -R expenses:expenses /opt/expenses
 cp deploy/expenses-backend.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now expenses-backend
 curl -s http://127.0.0.1:8080/health            # {"status":"ok"}
-```
 
-Reverse-proxy (nginx-блок `sashlevhealth`) и выпуск сертификата — часть общего сервера,
-см. полный чек-лист **[`vihrea1337/vpn-stack` → RESTORE-SERVER.md](https://github.com/vihrea1337/vpn-stack/blob/master/RESTORE-SERVER.md)**.
+# 3) nginx + certbot (свой, не общий стек)
+apt-get install -y nginx certbot python3-certbot-nginx
+# создать /etc/nginx/sites-available/expenses (server_name + proxy_pass http://127.0.0.1:8080),
+# включить симлинком в sites-enabled, nginx -t && systemctl reload nginx
+certbot --nginx -d vihreaexpenses.duckdns.org --agree-tos -m <email> --redirect
+```
