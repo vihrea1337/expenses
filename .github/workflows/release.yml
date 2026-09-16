@@ -1,0 +1,39 @@
+name: Release APK
+
+# Срабатывает при пуше тега вида v1.2.3 (git tag v1.2.3 && git push origin v1.2.3).
+# Собирает debug-APK Android-приложения и прикладывает его файлом к GitHub Release
+# с этим же тегом — чтобы после каждого тега был готовый apk для скачивания,
+# а не только исходный код.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# contents: write нужен, чтобы экшен мог создать Release и загрузить в него файл.
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Собрать APK и приложить к релизу
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Установить JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      # Android SDK на раннере уже стоит — просто принимаем лицензии.
+      - name: Принять лицензии Android SDK
+        run: yes | sdkmanager --licenses > /dev/null || true
+      - name: Собрать APK (debug)
+        working-directory: androidApp
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Опубликовать APK в GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: androidApp/app/build/outputs/apk/debug/app-debug.apk

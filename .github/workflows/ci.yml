@@ -36,8 +36,12 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - name: Установить Android SDK
-        uses: android-actions/setup-android@v3
+      # На раннерах GitHub Android SDK уже установлен заранее — не ставим его повторно
+      # через android-actions/setup-android (этот экшен последнее время ломается на
+      # принятии лицензий для устаревшего пакета "tools", которого больше нет в репозитории
+      # Google). Просто принимаем лицензии для SDK, который уже есть на диске.
+      - name: Принять лицензии Android SDK
+        run: yes | sdkmanager --licenses > /dev/null || true
       - name: Собрать приложение (debug)
         working-directory: androidApp
         run: |
