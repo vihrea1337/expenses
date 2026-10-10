@@ -82,9 +82,10 @@ interface ExpensesApi {
  */
 object ApiClient {
     // Адрес нашего бэкенда. Должен оканчиваться на "/".
-    // Переезд на новый сервер (2026-09-15): свой nginx на стандартном 443, без
-    // отдельного порта. Если переедем снова — меняем только эту строку.
-    private const val BASE_URL = "https://vihreaexpenses.duckdns.org/"
+    // Переезд 2026-10-10: сервер общий с другим проектом (Solmu), стандартный 443
+    // занят его шлюзом — поэтому у Expenses свой Caddy на отдельном порту 34443
+    // (см. deploy/server). Если переедем снова — меняем только эту строку.
+    private const val BASE_URL = "https://vihreaexpenses.duckdns.org:34443/"
 
     val api: ExpensesApi by lazy {
         // ignoreUnknownKeys = true — если сервер пришлёт лишние поля, не падаем.

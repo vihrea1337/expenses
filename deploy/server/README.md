@@ -4,7 +4,7 @@
 Всё живёт в одной папке и своей сети; наружу торчит только Caddy на порту **34443**.
 Данные восстанавливаются из дампа, секреты — из зашифрованного архива.
 
-Адрес после деплоя: `https://sashlevhealth.duckdns.org:34443` (сайт-страница и REST API).
+Адрес после деплоя: `https://vihreaexpenses.duckdns.org:34443` (сайт-страница и REST API).
 Telegram-бот работает через long-polling — входящие порты ему не нужны.
 
 ## 1. Подготовить на ПК
@@ -43,7 +43,7 @@ docker compose logs -f caddy              # дождаться строки о �
 - На https://www.duckdns.org переключить домен `sashlevhealth` на IP этого сервера.
 - Проверить:
 ```bash
-curl -s https://sashlevhealth.duckdns.org:34443/health   # {"status":"ok"}
+curl -s https://vihreaexpenses.duckdns.org:34443/health   # {"status":"ok"}
 ```
 - Приложение Android собрано с этим адресом (см. `androidApp` → `ApiClient`), нужно переустановить.
 - Бот: убедиться, что старый бэкенд (на прежнем сервере) погашен — иначе два бота на один токен = ошибка Telegram 409.

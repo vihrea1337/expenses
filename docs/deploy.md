@@ -1,6 +1,33 @@
-# Деплой на VPS — как реально устроено (факт на 2026-09-15)
+# Деплой на VPS — как реально устроено
 
-Документ фиксирует, **как бэкенд Expenses развёрнут на VPS**, чтобы будущие правки не сломали соседей (VPN). Историю переезда (старый сервер, старый домен) см. в конце файла.
+## Актуально (факт на 2026-10-10): общий сервер с Solmu, Docker-стек на порту 34443
+
+Сервер `130.49.176.80` (описан ниже) перестал отвечать: ping есть, TCP-порты закрыты, доступа нет.
+Expenses переехал на VPS пользователя **`104.165.244.223`** (Ubuntu 24.04, 2 ядра, 3.8 ГБ ОЗУ),
+где уже работает другой проект — **Solmu** (`/opt/solmu-node`, его Caddy занимает 80/443).
+Solmu **не трогаем** — у Expenses свой отдельный стек:
+
+- **Папка:** `/opt/expenses` — это содержимое [`deploy/server/`](../deploy/server) + jar в `backend/`.
+- **Контейнеры:** `expenses-pg` (Postgres 16), `expenses-backend` (Ktor, образ из jar),
+  `expenses-caddy` (Caddy с модулем DuckDNS). Своя docker-сеть, с Solmu не пересекаются.
+- **Адрес:** `https://vihreaexpenses.duckdns.org:34443` (веб-страница + REST API). Порт 34443
+  открыт в `ufw`. Android-приложение собрано с этим адресом (`ApiClient.BASE_URL`).
+- **HTTPS:** Caddy получает сертификат Let's Encrypt через **DNS-проверку DuckDNS** (DNS-01) —
+  порты 80/443 для этого не нужны. Токен DuckDNS — в `/opt/expenses/.env`.
+- **Секреты:** `/opt/expenses/.env` (`DB_PASSWORD`, `DUCKDNS_TOKEN`) и `/opt/expenses/expenses.env`
+  (`BOT_TOKEN`, `API_TOKEN`, `GROQ_API_KEY`), оба chmod 600, в git не попадают.
+- **База создана с нуля** — данные со старого сервера недоступны.
+- SSH с ПК: `ssh solmu-new` (алиас в `~/.ssh/config`). На сервере работает fail2ban — длинные
+  операции (сборка образа) запускать через `nohup`, SSH-сессию иногда обрывает.
+
+Обновить бэкенд: `buildFatJar` → `scp backend/build/libs/expenses-backend-all.jar solmu-new:/opt/expenses/backend/`
+→ на сервере `cd /opt/expenses && docker compose up -d --build expenses-backend`.
+
+---
+
+## Прежняя схема (факт на 2026-09-15, сервер `130.49.176.80` — недоступен)
+
+Документ фиксирует, **как бэкенд Expenses был развёрнут на VPS**, чтобы будущие правки не сломали соседей (VPN). Историю переезда (старый сервер, старый домен) см. в конце файла.
 
 ## Что на сервере
 
