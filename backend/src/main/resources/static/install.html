@@ -10,15 +10,127 @@
      постоянное, поэтому ссылку не надо править при каждой новой сборке; атрибут
      download задаёт имя с версией, чтобы в «Загрузках» не копились «Expenses (1).apk». -->
 <link rel="stylesheet" href="./legal.css">
+<style>
+  /*
+   * «Витрина» вверху страницы: слоган + мини-демо быстрого ввода.
+   * Демо — чистый CSS (без JavaScript): строка «такси до дома 350» «печатается»
+   * (ширина растёт по шагам steps()), затем появляется карточка траты с категорией от ИИ.
+   * Цикл анимации — 8 секунд, бесконечно. Для тех, у кого в системе включено
+   * «уменьшить движение» (prefers-reduced-motion), анимации отключены — сразу итог.
+   */
+  .hero {
+    position: relative; overflow: hidden; border-radius: 18px; padding: 28px 22px 24px;
+    margin-bottom: 18px; color: #fff;
+    background:
+      radial-gradient(120% 90% at 100% 0%, rgba(255,255,255,.18) 0%, transparent 55%),
+      linear-gradient(135deg, #1b5e20 0%, #2e7d32 45%, #43a047 100%);
+  }
+  /* Декоративные «монетки» на фоне — полупрозрачные круги. */
+  .hero::before, .hero::after {
+    content: ""; position: absolute; border-radius: 50%; background: rgba(255,255,255,.08);
+  }
+  .hero::before { width: 220px; height: 220px; right: -70px; bottom: -90px; }
+  .hero::after { width: 120px; height: 120px; right: 90px; top: -50px; }
+  .hero > * { position: relative; }
+  /* На широком экране — две колонки: текст слева, демо справа. На телефоне — друг под другом. */
+  .hero-grid { display: grid; gap: 22px; align-items: center; }
+  @media (min-width: 640px) {
+    .hero-grid { grid-template-columns: 1fr 300px; }
+  }
+  @media (max-width: 420px) {
+    .hero h1 { font-size: 25px; }
+  }
+  .hero .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; opacity: .95; }
+  .hero .brand span { font-size: 26px; }
+  .hero h1 { font-size: 30px; line-height: 1.2; margin: 14px 0 8px; letter-spacing: -.01em; }
+  .hero .sub { margin: 0; color: rgba(255,255,255,.88); max-width: 520px; }
+
+  .demo { display: grid; gap: 10px; width: 100%; max-width: 340px; justify-self: center; }
+  .bubble {
+    justify-self: end; background: #fff; color: #1a1a1a; border-radius: 16px 16px 4px 16px;
+    padding: 9px 14px; font-weight: 600; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 15px;
+  }
+  .bubble .typed {
+    display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom;
+    width: 17ch; border-right: 2px solid #2e7d32;
+    box-sizing: content-box; /* рамка-курсор не съедает ширину текста (иначе обрезается «0») */
+    animation: typing 8s steps(17) infinite, caret .8s step-end infinite;
+  }
+  .result {
+    display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,.96);
+    color: #1a1a1a; border-radius: 14px; padding: 10px 14px; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+    animation: pop 8s ease-out infinite;
+  }
+  .result .ico { font-size: 22px; }
+  .result .what { flex: 1; min-width: 0; }
+  .result .what b { display: block; font-size: 15px; }
+  .chip {
+    display: inline-block; margin-top: 2px; font-size: 12px; font-weight: 600; color: #2e7d32;
+    background: #e8f5e9; border-radius: 999px; padding: 1px 8px;
+  }
+  .result .sum { font-weight: 700; white-space: nowrap; }
+
+  @keyframes typing {
+    0%, 6% { width: 0; }
+    32%, 100% { width: 17ch; }
+  }
+  @keyframes caret { 50% { border-color: transparent; } }
+  @keyframes pop {
+    0%, 36% { opacity: 0; transform: translateY(8px) scale(.97); }
+    44%, 92% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-4px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble .typed, .result { animation: none; }
+    .bubble .typed { border-right: none; }
+  }
+
+  /* Ряд «фишек» — коротко, что умеет приложение. */
+  .features {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+    margin: 0 0 18px;
+  }
+  .feature {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  }
+  .feature .f-ico { font-size: 22px; }
+  .feature b { display: block; margin: 4px 0 2px; }
+  .feature span { color: var(--muted); font-size: 14px; line-height: 1.4; }
+  h2.section { font-size: 20px; margin: 26px 0 12px; }
+</style>
 </head>
 <body>
 <main>
-  <header>
-    <span class="logo" aria-hidden="true">💸</span>
-    <h1>Установить Expenses</h1>
-  </header>
-  <p class="lead">Учёт личных расходов быстрым вводом. Одни и те же траты видны в приложении на телефоне,
-    в Telegram-боте и в браузере — достаточно войти одним токеном.</p>
+  <section class="hero">
+    <div class="brand"><span aria-hidden="true">💸</span> Expenses</div>
+    <div class="hero-grid">
+    <div>
+    <!-- &nbsp; перед тире — чтобы тире не уезжало одно на новую строку. -->
+    <h1>Написал «кофе&nbsp;200»&nbsp;—<br>и трата уже посчитана.</h1>
+    <p class="sub">Учёт расходов за три секунды: в Telegram, в приложении или в браузере.
+      Остальное — категории, графики, бюджет — сделает Expenses.</p>
+    </div>
+    <!-- Демо быстрого ввода. Для экранных читалок — понятная подпись вместо анимации. -->
+    <div class="demo" role="img" aria-label="Пример: сообщение «такси до дома 350» превращается в трату 350 рублей в категории «транспорт»">
+      <div class="bubble"><span class="typed">такси до дома 350</span></div>
+      <div class="result">
+        <span class="ico">🚕</span>
+        <span class="what"><b>такси до дома</b><span class="chip">🤖 транспорт</span></span>
+        <span class="sum">350 ₽</span>
+      </div>
+    </div>
+    </div>
+  </section>
+
+  <div class="features">
+    <div class="feature"><span class="f-ico">⚡</span><b>Одна строка</b><span>«такси 350» — и готово, без форм и списков</span></div>
+    <div class="feature"><span class="f-ico">🤖</span><b>ИИ-категории</b><span>«капучино» сам попадёт в «еду»</span></div>
+    <div class="feature"><span class="f-ico">📊</span><b>Аналитика</b><span>куда уходят деньги и сколько осталось до лимита</span></div>
+    <div class="feature"><span class="f-ico">🔄</span><b>Везде одно</b><span>телефон, бот и сайт видят общие траты, даже офлайн</span></div>
+  </div>
+
+  <h2 class="section">Как начать</h2>
 
   <section class="card" id="android">
     <h2>Android</h2>
