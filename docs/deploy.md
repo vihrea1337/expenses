@@ -20,6 +20,11 @@ Solmu **не трогаем** — у Expenses свой отдельный сте
 - SSH с ПК: `ssh solmu-new` (алиас в `~/.ssh/config`). На сервере работает fail2ban — длинные
   операции (сборка образа) запускать через `nohup`, SSH-сессию иногда обрывает.
 
+- **APK для скачивания:** `/opt/expenses/downloads/Expenses.apk` — Caddy отдаёт его по
+  `/download/Expenses.apk` (ссылка на странице `/install.html`). Новая сборка: `assembleDebug` →
+  `scp androidApp/app/build/outputs/apk/debug/app-debug.apk solmu-new:/opt/expenses/downloads/Expenses.apk`
+  (перезапуск не нужен; версию в тексте `install.html` поправить вручную).
+
 Обновить бэкенд: `buildFatJar` → `scp backend/build/libs/expenses-backend-all.jar solmu-new:/opt/expenses/backend/`
 → на сервере `cd /opt/expenses && docker compose up -d --build expenses-backend`.
 
