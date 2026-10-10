@@ -346,7 +346,18 @@ private fun helpText(): String = """
     /token — токен для входа в приложение/на сайт
     /link — привязать бот к аккаунту (/link токен)
     /help — эта справка
+
+    📱 Приложение для Android и веб-версия: $PUBLIC_URL/install.html
+    Конфиденциальность: $PUBLIC_URL/privacy.html
 """.trimIndent()
+
+/**
+ * Публичный адрес сервиса — для ссылок в справке бота. Задаётся переменной окружения
+ * PUBLIC_URL (без "/" в конце); если её нет — текущий боевой адрес.
+ */
+private val PUBLIC_URL: String =
+    System.getenv("PUBLIC_URL")?.trim()?.trimEnd('/')?.ifEmpty { null }
+        ?: "https://vihreaexpenses.duckdns.org:34443"
 
 /** Список последних (до 10) трат. */
 private fun listText(userId: UUID): String {

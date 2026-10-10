@@ -28,8 +28,8 @@ android {
         applicationId = "io.github.vihrea1337.expenses"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.2.0"
         // Токен доступа к API — доступен в коде как BuildConfig.API_TOKEN.
         buildConfigField("String", "API_TOKEN", "\"$apiToken\"")
     }

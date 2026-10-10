@@ -109,6 +109,8 @@
             white-space: nowrap; overflow: hidden;
         }
         .hidden { display: none; }
+        .footer-links { text-align: center; color: var(--muted); font-size: 13px; margin: 8px 0 24px; }
+        .footer-links a { color: var(--muted); }
         /* Подсказка при наведении на сектор кольцевой диаграммы — следует за курсором. */
         .donut-tip {
             position: fixed; pointer-events: none; z-index: 10;
@@ -179,6 +181,14 @@
         <div class="card" id="list">
             <div class="empty">Загрузка…</div>
         </div>
+    </div>
+
+    <!-- Подвал: ссылки на информационные страницы (статика рядом, см. legal.css).
+         Виден всегда — и на экране входа, и после него. -->
+    <div class="footer-links">
+        <a href="./install.html">📱 Скачать приложение</a> ·
+        <a href="./privacy.html">Конфиденциальность</a> ·
+        <a href="./terms.html">Условия</a>
     </div>
 </div>
 

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установить Expenses</title>
+<!-- Страница «как начать пользоваться»: ссылка на APK, Telegram-бот и веб-версия.
+     Файл APK лежит НЕ в бэкенде, а в папке downloads на сервере — его отдаёт Caddy
+     по адресу /download/Expenses.apk (см. deploy/server/Caddyfile). Имя файла
+     постоянное, поэтому ссылку не надо править при каждой новой сборке; атрибут
+     download задаёт имя с версией, чтобы в «Загрузках» не копились «Expenses (1).apk». -->
+<link rel="stylesheet" href="./legal.css">
+</head>
+<body>
+<main>
+  <header>
+    <span class="logo" aria-hidden="true">💸</span>
+    <h1>Установить Expenses</h1>
+  </header>
+  <p class="lead">Учёт личных расходов быстрым вводом. Одни и те же траты видны в приложении на телефоне,
+    в Telegram-боте и в браузере — достаточно войти одним токеном.</p>
+
+  <section class="card" id="android">
+    <h2>Android</h2>
+    <p class="meta">Android 8.0 и новее · около 11 МБ · версия 1.2.0</p>
+    <a class="btn" href="./download/Expenses.apk" download="Expenses-1.2.0.apk">Скачать APK</a>
+    <ol>
+      <li>Откройте скачанный файл. Телефон попросит разрешить установку приложений из браузера
+        или «Файлов» — разрешите.</li>
+      <li>Если Google Play Protect предупредит о неизвестном приложении — <b>«Всё равно установить»</b>:
+        Expenses не публикуется в Google Play.</li>
+      <li>При первом запуске нажмите <b>«Создать аккаунт»</b> или войдите по токену, который выдаёт
+        бот командой <code>/token</code>.</li>
+      <li>Приложение работает и без интернета: траты сохраняются на телефоне и уходят на сервер,
+        когда связь появится.</li>
+    </ol>
+  </section>
+
+  <section class="card" id="telegram">
+    <h2>Telegram-бот</h2>
+    <p class="meta">Ничего устанавливать не нужно</p>
+    <a class="btn" href="https://t.me/Expensesvihrea_bot">Открыть @Expensesvihrea_bot</a>
+    <ol>
+      <li>Нажмите <b>«Старт»</b> и просто напишите трату: <code>кофе 200</code> или
+        <code>такси до дома 350</code>.</li>
+      <li>Уже есть аккаунт в приложении? Отправьте боту <code>/link &lt;ваш токен&gt;</code> —
+        траты станут общими.</li>
+      <li>Нет аккаунта? Команда <code>/token</code> покажет токен, им можно войти в приложение и на сайт.</li>
+    </ol>
+  </section>
+
+  <section class="card" id="web">
+    <h2>Браузер</h2>
+    <p class="meta">Chrome, Edge, Firefox, Safari — на компьютере и на телефоне</p>
+    <a class="btn secondary" href="./">Открыть веб-версию</a>
+  </section>
+
+  <div class="note">
+    <b>Это демонстрационный pet-проект.</b> Сервис работает «как есть»: база может быть очищена,
+    а сервер — временно недоступен. Не храните здесь единственную копию важных данных.
+  </div>
+
+  <footer>
+    <a href="./privacy.html">Конфиденциальность</a> ·
+    <a href="./terms.html">Условия использования</a> ·
+    <a href="./">Открыть Expenses</a>
+  </footer>
+</main>
+</body>
+</html>

@@ -1,5 +1,5 @@
-# Expenses на сервере (в /root/app). Три контейнера в своей сети; наружу торчит
-# ТОЛЬКО Caddy на порту 34443 (HTTPS). Стек брата не затрагиваем.
+# Expenses на сервере (в /opt/expenses). Три контейнера в своей сети; наружу торчит
+# ТОЛЬКО Caddy на порту 34443 (HTTPS). Соседний проект на сервере (Solmu) не затрагиваем.
 #
 # Порядок запуска и восстановления данных — см. README.md рядом.
 services:
@@ -41,6 +41,7 @@ services:
       DUCKDNS_TOKEN: ${DUCKDNS_TOKEN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./downloads:/srv/download:ro   # APK для страницы install.html
       - caddy_data:/data
       - caddy_config:/config
     networks: [expenses-net]
