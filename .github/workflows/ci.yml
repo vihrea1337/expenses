@@ -1,15 +1,25 @@
 name: CI
 
-# Запускаем проверки на каждый пуш в main и на каждый pull request.
+# Проверки на каждый пуш в main и на каждый pull request.
+# Репозиторий публичный — минуты GitHub Actions для него бесплатны, поэтому гоняем всё:
+#   1) тесты бэкенда (на встроенной базе H2) + сборка fat-jar;
+#   2) смоук-тест НАСТОЯЩЕГО Docker-образа на настоящем Postgres — ровно как на сервере;
+#   3) сборка Android-приложения.
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: # кнопка «Run workflow» во вкладке Actions — прогнать вручную
+
+# Новый пуш в ту же ветку отменяет ещё идущую проверку старого — не жжём минуты впустую.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend-tests:
-    name: Бэкенд — тесты
+    name: Бэкенд — тесты и сборка
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,11 +29,82 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
-      - name: Прогнать тесты бэкенда
+      - name: Прогнать тесты и собрать fat-jar
         working-directory: backend
         run: |
           chmod +x ./gradlew
-          ./gradlew test --no-daemon
+          ./gradlew test buildFatJar --no-daemon
+      # Упали тесты — выкладываем HTML-отчёт Gradle: в нём видно, какой тест и почему.
+      - name: Отчёт о тестах (если упали)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: backend/build/reports/tests/
+          retention-days: 7
+      # jar передаём следующему job — смоук-тест соберёт из него Docker-образ.
+      - name: Сохранить jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: expenses-backend-jar
+          path: backend/build/libs/expenses-backend-all.jar
+          retention-days: 7
+
+  docker-smoke:
+    name: Docker-образ — смоук-тест на Postgres
+    needs: backend-tests
+    runs-on: ubuntu-latest
+    # Настоящий Postgres 16 рядом с job — как контейнер expenses-pg на сервере.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: expenses
+          POSTGRES_PASSWORD: ci-password
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: expenses-backend-jar
+          path: deploy/server/backend
+      # Тот же Dockerfile, что на сервере (deploy/server/backend/Dockerfile).
+      - name: Собрать образ бэкенда
+        run: docker build -t expenses-backend:ci deploy/server/backend
+      # Без BOT_TOKEN и GROQ_API_KEY: бот и ИИ выключены, остальное обязано работать.
+      - name: Запустить контейнер
+        run: |
+          docker run -d --name expenses --network host \
+            -e HOST=127.0.0.1 -e PORT=8080 \
+            -e DB_URL=jdbc:postgresql://127.0.0.1:5432/expenses -e DB_USER=postgres -e DB_PASSWORD=ci-password \
+            expenses-backend:ci
+      - name: Дождаться /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8080/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs expenses; exit 1
+      # Сквозной сценарий: регистрация → трата → список → CSV; чужой токен трату не видит.
+      - name: Сквозной сценарий API
+        run: |
+          set -e
+          B=http://127.0.0.1:8080
+          T1=$(curl -fs -X POST $B/api/register -H 'Content-Type: application/json' -d '{"name":"CI"}' | jq -r .token)
+          T2=$(curl -fs -X POST $B/api/register -H 'Content-Type: application/json' -d '{"name":"Другой"}' | jq -r .token)
+          curl -fs -X POST $B/api/expenses -H "Authorization: Bearer $T1" -H 'Content-Type: application/json' \
+            -d '{"amount":250,"category":"такси"}' > /dev/null
+          curl -fs $B/api/expenses -H "Authorization: Bearer $T1" | jq -e 'length == 1 and .[0].amount == 250' > /dev/null
+          curl -fs $B/api/expenses -H "Authorization: Bearer $T2" | jq -e 'length == 0' > /dev/null
+          curl -fs $B/api/expenses.csv -H "Authorization: Bearer $T1" | grep -q "такси"
+          test "$(curl -s -o /dev/null -w '%{http_code}' $B/api/expenses)" = "401"
+          curl -fs $B/install.html | grep -q "Установить Expenses"
+          echo "регистрация, трата, изоляция пользователей, CSV, авторизация и страницы работают"
+      - name: Лог контейнера
+        if: always()
+        run: docker logs expenses 2>&1 | tail -50
 
   android-build:
     name: Android — сборка debug
@@ -47,3 +128,9 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
+      - name: Сохранить APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: expenses-apk
+          path: androidApp/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

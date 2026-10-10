@@ -1,0 +1,80 @@
+name: Deploy
+
+# Выкатка на сервер. Запускается ВРУЧНУЮ: Actions → Deploy → Run workflow.
+# Автоматический деплой на каждый пуш сознательно не делаем: сервер общий с другими
+# проектами, и выкатка должна быть осознанным действием.
+#
+# Что делает: тесты → fat-jar → APK → заливает jar в /opt/expenses/backend и APK в
+# /opt/expenses/downloads → пересобирает только контейнер бэкенда → ждёт /health.
+#
+# Нужны секреты репозитория (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (приватный ключ ОТДЕЛЬНОЙ пары только для деплоя),
+#   DEPLOY_KNOWN_HOSTS (вывод `ssh-keyscan <адрес>` — защита от подмены сервера).
+# Пока секретов нет — job честно пропускает выкатку и пишет, чего не хватает.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Собрать и выкатить
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Есть ли секреты для деплоя
+        id: check
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
+            echo "::warning::Секреты DEPLOY_HOST / DEPLOY_SSH_KEY не заданы — выкатка пропущена (см. docs/deploy.md)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
+      - name: Установить JDK 21
+        if: steps.check.outputs.ready == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Тесты и fat-jar
+        if: steps.check.outputs.ready == 'true'
+        working-directory: backend
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test buildFatJar --no-daemon
+      - name: Собрать APK
+        if: steps.check.outputs.ready == 'true'
+        working-directory: androidApp
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Настроить SSH
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Выкатить
+        if: steps.check.outputs.ready == 'true'
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy backend/build/libs/expenses-backend-all.jar "$TARGET:/opt/expenses/backend/"
+          scp -i ~/.ssh/deploy androidApp/app/build/outputs/apk/debug/app-debug.apk "$TARGET:/opt/expenses/downloads/Expenses.apk"
+          ssh -i ~/.ssh/deploy "$TARGET" 'cd /opt/expenses && docker compose up -d --build expenses-backend'
+          for i in $(seq 1 40); do
+            if curl -fs https://vihreaexpenses.duckdns.org:34443/health; then echo; echo "выкачено"; exit 0; fi
+            sleep 3
+          done
+          echo "::error::сервер не ответил на /health после выкатки"
+          exit 1

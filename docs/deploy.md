@@ -3,7 +3,7 @@
 ## Актуально (факт на 2026-10-10): общий сервер с Solmu, Docker-стек на порту 34443
 
 Сервер `130.49.176.80` (описан ниже) перестал отвечать: ping есть, TCP-порты закрыты, доступа нет.
-Expenses переехал на VPS пользователя **`104.165.244.223`** (Ubuntu 24.04, 2 ядра, 3.8 ГБ ОЗУ),
+Expenses переехал на VPS пользователя (SSH-алиас **`solmu-new`**, IP в публичный репозиторий не пишем; Ubuntu 24.04, 2 ядра, 3.8 ГБ ОЗУ),
 где уже работает другой проект — **Solmu** (`/opt/solmu-node`, его Caddy занимает 80/443).
 Solmu **не трогаем** — у Expenses свой отдельный стек:
 
@@ -27,6 +27,18 @@ Solmu **не трогаем** — у Expenses свой отдельный сте
 
 Обновить бэкенд: `buildFatJar` → `scp backend/build/libs/expenses-backend-all.jar solmu-new:/opt/expenses/backend/`
 → на сервере `cd /opt/expenses && docker compose up -d --build expenses-backend`.
+
+### Деплой из GitHub Actions (по кнопке)
+
+`.github/workflows/deploy.yml` (Actions → Deploy → Run workflow): тесты → fat-jar → APK →
+заливка в `/opt/expenses/backend` и `/opt/expenses/downloads` → пересборка контейнера бэкенда →
+ожидание `/health`. Нужны секреты репозитория `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`
+(приватный ключ **отдельной** пары только для деплоя; лучше не root, а пользователь `deploy` в
+группе `docker`), `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan <адрес>`). Без секретов workflow
+ничего не делает и пишет предупреждение.
+
+CI (`ci.yml`) на каждый пуш, кроме тестов, собирает настоящий Docker-образ и гоняет его на
+Postgres: регистрация, трата, изоляция пользователей, CSV, 401 без токена, страница установки.
 
 ---
 
