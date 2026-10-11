@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Траты</string>
+    <string name="widget_name">Траты за месяц</string>
+    <string name="widget_description">Сколько потрачено в этом месяце и быстрый ввод траты</string>
+    <string name="shortcut_add_short">Трата</string>
+    <string name="shortcut_add_long">Добавить трату</string>
 </resources>

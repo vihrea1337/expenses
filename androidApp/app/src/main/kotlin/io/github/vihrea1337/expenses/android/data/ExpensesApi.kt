@@ -8,17 +8,13 @@ import io.github.vihrea1337.expenses.NewExpense
 import io.github.vihrea1337.expenses.RegisterRequest
 import io.github.vihrea1337.expenses.UpdateExpense
 import io.github.vihrea1337.expenses.UserResponse
-import io.github.vihrea1337.expenses.android.TokenStore
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
+import io.github.vihrea1337.expenses.android.BuildConfig
 import okhttp3.ResponseBody
 import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -27,16 +23,11 @@ import retrofit2.http.Query
 /**
  * Описание "ручек" нашего REST API. Retrofit по этому интерфейсу сам сгенерирует
  * рабочий код HTTP-запросов. suspend — функции асинхронные (вызываются из корутины).
+ *
+ * Сам клиент (адрес сервера, токен в заголовке, таймауты) настраивается в di/AppModule —
+ * раньше это был `object ApiClient` рядом, теперь его создаёт Hilt.
  */
 interface ExpensesApi {
-    /** GET /api/expenses — получить список всех трат. */
-    @GET("api/expenses")
-    suspend fun getExpenses(): List<Expense>
-
-    /** POST /api/expenses — добавить трату; в тело кладём NewExpense, сервер вернёт готовую Expense. */
-    @POST("api/expenses")
-    suspend fun addExpense(@Body body: NewExpense): Expense
-
     /**
      * GET /api/expenses/changes — что изменилось после момента [since] (null — вся история),
      * включая мягко удалённые (`deleted = true`). Основа офлайн-синхронизации: полный список
@@ -44,6 +35,10 @@ interface ExpensesApi {
      */
     @GET("api/expenses/changes")
     suspend fun getExpensesChanges(@Query("since") since: String?, @Query("limit") limit: Int = 200): ExpensesChangesDto
+
+    /** POST /api/expenses — добавить трату; в тело кладём NewExpense, сервер вернёт готовую Expense. */
+    @POST("api/expenses")
+    suspend fun addExpense(@Body body: NewExpense): Expense
 
     /**
      * DELETE /api/expenses/{id} — удалить трату по id.
@@ -68,49 +63,21 @@ interface ExpensesApi {
     @POST("api/register")
     suspend fun register(@Body body: RegisterRequest): UserResponse
 
-    /** GET /api/me — проверить токен и узнать имя текущего пользователя. */
+    /**
+     * GET /api/me — проверить токен и узнать имя текущего пользователя.
+     * [authorization] — заголовок явно, для проверки токена ДО входа (в сессии его ещё нет);
+     * null — Retrofit заголовок не добавит, и токен подставит перехватчик из сессии.
+     */
     @GET("api/me")
-    suspend fun me(): MeResponse
+    suspend fun me(@Header("Authorization") authorization: String? = null): MeResponse
 
     /** GET /api/expenses.csv — выгрузка всех трат в CSV. ResponseBody — сырые байты файла. */
     @GET("api/expenses.csv")
     suspend fun exportCsv(): ResponseBody
-}
 
-/**
- * Единая точка создания клиента Retrofit. by lazy — создаём его один раз при первом обращении.
- */
-object ApiClient {
-    // Адрес нашего бэкенда. Должен оканчиваться на "/".
-    // Переезд 2026-10-10: сервер общий с другим проектом (Solmu), стандартный 443
-    // занят его шлюзом — поэтому у Expenses свой Caddy на отдельном порту 34443
-    // (см. deploy/server). Если переедем снова — меняем только эту строку.
-    private const val BASE_URL = "https://vihreaexpenses.duckdns.org:34443/"
-
-    val api: ExpensesApi by lazy {
-        // ignoreUnknownKeys = true — если сервер пришлёт лишние поля, не падаем.
-        val json = Json { ignoreUnknownKeys = true }
-        val contentType = "application/json".toMediaType()
-
-        // OkHttp-клиент с "перехватчиком" (interceptor): он вклинивается в каждый исходящий
-        // запрос и добавляет заголовок Authorization с токеном, чтобы сервер нас пустил.
-        val httpClient = OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
-                // Токен текущего пользователя (после входа/регистрации). Для /api/register его нет — ок.
-                val token = TokenStore.token
-                if (!token.isNullOrEmpty()) {
-                    builder.addHeader("Authorization", "Bearer $token")
-                }
-                chain.proceed(builder.build())
-            }
-            .build()
-
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .client(httpClient)
-            .addConverterFactory(json.asConverterFactory(contentType))
-            .build()
-            .create(ExpensesApi::class.java)
+    companion object {
+        // Адрес бэкенда — из настроек сборки (см. app/build.gradle.kts): release всегда
+        // смотрит на боевой сервер, debug можно направить на локальный. Оканчивается на "/".
+        val BASE_URL: String = BuildConfig.BASE_URL
     }
 }

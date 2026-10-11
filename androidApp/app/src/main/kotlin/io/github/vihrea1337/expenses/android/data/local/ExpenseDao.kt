@@ -20,6 +20,10 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses WHERE id = :id")
     suspend fun getById(id: String): ExpenseEntity?
 
+    /** Сколько изменений ещё не отправлено на сервер (новые, правки, удаления). */
+    @Query("SELECT COUNT(*) FROM expenses WHERE synced = 0 OR dirty = 1 OR pendingDelete = 1")
+    fun observeUnsentCount(): Flow<Int>
+
     /** Траты, ещё не подтверждённые сервером — их нужно ОТПРАВИТЬ (POST) при синхронизации. */
     @Query("SELECT * FROM expenses WHERE synced = 0 AND pendingDelete = 0")
     suspend fun unsynced(): List<ExpenseEntity>
@@ -45,4 +49,8 @@ interface ExpenseDao {
 
     @Query("DELETE FROM expenses WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    /** Стереть весь кэш — при выходе из аккаунта (траты прежнего пользователя не должны остаться). */
+    @Query("DELETE FROM expenses")
+    suspend fun deleteAll()
 }

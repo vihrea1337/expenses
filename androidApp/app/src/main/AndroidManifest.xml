@@ -1,24 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Приложение ходит в интернет (к нашему бэкенду) — нужно это разрешение. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WorkManager проверяет условие «есть сеть» перед синхронизацией. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- allowBackup=false + dataExtractionRules: токен доступа и кэш трат не уезжают
+         в облачную резервную копию (см. xml/data_extraction_rules.xml). -->
     <application
-        android:allowBackup="true"
-        android:icon="@drawable/ic_launcher"
+        android:name=".ExpensesApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Expenses">
+        <!-- singleTop: нажатие на виджет или ярлык при уже открытом приложении не создаёт
+             второй экземпляр экрана, а приходит в onNewIntent. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Expenses">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Expenses.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Ярлык «Добавить трату» — долгое нажатие на значок приложения. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Виджет на рабочий стол: потрачено за месяц из бюджета + кнопка «+». -->
+        <receiver
+            android:name=".widget.ExpensesWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/expenses_widget_info" />
+        </receiver>
+
+        <!-- WorkManager по умолчанию создаёт себя сам при старте. Отключаем это:
+             его настраивает ExpensesApp — с фабрикой воркеров от Hilt, иначе воркеры
+             с зависимостями в конструкторе не создадутся. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

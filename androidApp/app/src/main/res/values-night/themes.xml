@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тёмная тема окна: тот же стиль, но тёмный фон — без белой вспышки при запуске. -->
+    <style name="Theme.Expenses" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+
+    <color name="window_background">#111411</color>
+</resources>

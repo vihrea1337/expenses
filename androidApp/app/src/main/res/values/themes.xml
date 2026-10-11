@@ -1,8 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Тема приложения. Без action bar (шапку рисует сам Compose).
-         Берём платформенную тему, чтобы не тянуть лишних зависимостей. -->
+    <!-- Тема окна до того, как Compose нарисует свой интерфейс. Сам интерфейс красит
+         ExpensesTheme (ui/theme). Без action bar — шапку рисует Compose. Тёмный вариант —
+         в values-night, чтобы при тёмной теме не было белой вспышки при запуске. -->
     <style name="Theme.Expenses" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
+
+    <!-- Заставка при запуске (SplashScreen API): значок на фирменном фоне, затем —
+         обычная тема приложения. -->
+    <style name="Theme.Expenses.Splash" parent="Theme.SplashScreen.IconBackground">
+        <item name="windowSplashScreenBackground">@color/window_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/brand</item>
+        <item name="postSplashScreenTheme">@style/Theme.Expenses</item>
+    </style>
+
+    <color name="window_background">#F5F7F4</color>
+    <color name="brand">#2E7D32</color>
 </resources>

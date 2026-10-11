@@ -1,66 +1,110 @@
 package io.github.vihrea1337.expenses.android.data
 
+import io.github.vihrea1337.expenses.BudgetDto
 import io.github.vihrea1337.expenses.Expense
 import io.github.vihrea1337.expenses.NewExpense
 import io.github.vihrea1337.expenses.UpdateExpense
 import io.github.vihrea1337.expenses.android.data.local.ExpenseDao
 import io.github.vihrea1337.expenses.android.data.local.ExpenseEntity
-import io.github.vihrea1337.expenses.android.data.local.ExpensesDatabase
 import io.github.vihrea1337.expenses.android.data.local.toEntity
 import io.github.vihrea1337.expenses.android.data.local.toExpense
+import java.time.LocalDateTime
+import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.time.LocalDateTime
-import java.util.UUID
 
 /**
- * Офлайн-first слой данных: экран ЧИТАЕТ только отсюда (из Room, [observeExpenses]), а не
- * напрямую из сети — список доступен мгновенно и даже без связи. Сеть используется только
- * фоном, в [sync], чтобы кэш не расходился с сервером.
- *
- * Полный цикл офлайн-очереди (2026-09-02): добавление, редактирование И удаление трат все
- * работают офлайн — записываются в Room немедленно, реальная отправка на сервер (POST/PUT/
- * DELETE) идёт при следующем [sync]. Синхронизация — двусторонняя, по протоколу "что
- * изменилось после момента X" (`GET /api/expenses/changes`), с разрешением конфликтов по
- * `updatedAt`: если во время synchronization выясняется, что на сервере есть более свежая
- * версия той же траты (её успели поменять с другого устройства/клиента), она побеждает, а
- * наша неотправленная локальная правка отбрасывается — см. [applyServerChange].
+ * Траты и бюджет. Экраны и виджет знают только этот ИНТЕРФЕЙС — не знают ни про Room, ни
+ * про Retrofit. Поэтому в юнит-тестах ViewModel вместо него подставляется простой фейк
+ * без сети и базы (см. src/test), а связку интерфейс → реализация задаёт RepositoryModule.
  */
-object ExpensesRepository {
-    private val dao: ExpenseDao get() = ExpensesDatabase.dao
+interface ExpensesRepository {
+    /** Траты из локального кэша — работает и без сети; Flow сам приходит заново при изменениях. */
+    fun observeExpenses(): Flow<List<Expense>>
 
-    // Гарантирует, что два одновременных refresh() (например, двойной тап "Обновить") не
-    // погонят две параллельные синхронизации: вторая просто дождётся первой. Без этого
-    // операции пусть и не портили бы данные (POST идемпотентен по id, DELETE безопасен
-    // повторно), но зря дублировали бы сетевые запросы.
+    /** Сколько изменений ждёт отправки на сервер (чтобы предупредить при выходе). */
+    fun observeUnsentCount(): Flow<Int>
+
+    /** Месячный бюджет (копия с сервера, null — не задан). */
+    val budget: Flow<Double?>
+
+    /** Отправить накопленное офлайн и забрать изменения с сервера. Бросает, если сети нет. */
+    suspend fun sync()
+
+    suspend fun add(amount: Double, category: String, note: String?, tag: String?)
+    suspend fun edit(id: String, amount: Double, category: String, note: String?, categoryGroup: String?, tag: String?)
+    suspend fun delete(id: String)
+
+    /** Задать бюджет — сразу на сервере (это настройка, а не трата: офлайн-очередь не нужна). */
+    suspend fun setBudget(value: Double?)
+
+    /** Все траты в CSV (байты файла) — делает сервер. */
+    suspend fun exportCsv(): ByteArray
+
+    /** Стереть локальный кэш — при выходе из аккаунта и перед входом в другой. */
+    suspend fun clearLocalData()
+}
+
+/**
+ * Офлайн-first реализация: экран ЧИТАЕТ только из Room ([observeExpenses]), а не напрямую из
+ * сети — список доступен мгновенно и даже без связи. Сеть используется только в [sync].
+ *
+ * Полный цикл офлайн-очереди: добавление, редактирование И удаление трат работают офлайн —
+ * записываются в Room немедленно, реальная отправка на сервер (POST/PUT/DELETE) идёт при
+ * следующем [sync]. Синхронизация — двусторонняя, по протоколу "что изменилось после момента
+ * X" (`GET /api/expenses/changes`), с разрешением конфликтов по `updatedAt`: если на сервере
+ * есть более свежая версия той же траты (её успели поменять с другого устройства или в боте),
+ * она побеждает, а наша неотправленная локальная правка отбрасывается — см. [serverWins].
+ *
+ * В версии 2.0 логика синхронизации не менялась — она переехала из `object ExpensesRepository`
+ * (глобальный объект, ходил в глобальные ApiClient/ExpensesDatabase/SyncCursorStore) в класс,
+ * которому всё нужное передаётся в конструктор. Это и позволило покрыть её тестом с
+ * поддельным сервером (ExpensesRepositorySyncTest).
+ */
+@Singleton
+class ExpensesRepositoryImpl @Inject constructor(
+    private val api: ExpensesApi,
+    private val dao: ExpenseDao,
+    private val settings: SettingsStore,
+) : ExpensesRepository {
+
+    // Гарантирует, что две одновременные синхронизации (экран + фоновый WorkManager) не
+    // пойдут параллельно: вторая просто дождётся первой. Без этого операции пусть и не
+    // портили бы данные (POST идемпотентен по id, DELETE безопасен повторно), но зря
+    // дублировали бы сетевые запросы.
     private val syncMutex = Mutex()
 
-    fun observeExpenses(): Flow<List<Expense>> =
+    override fun observeExpenses(): Flow<List<Expense>> =
         dao.observeAll().map { rows -> rows.map { it.toExpense() } }
 
+    override fun observeUnsentCount(): Flow<Int> = dao.observeUnsentCount()
+
+    override val budget: Flow<Double?> get() = settings.budget
+
     /**
-     * Синхронизация с сервером: сначала лучшая попытка отправить всё, что накопилось офлайн
-     * (удаления → правки → новые траты — в этом порядке, чтобы не тратить сеть на PUT для
-     * записи, которую следом всё равно удалят), потом — забрать изменения с сервера дельтой.
+     * Сначала лучшая попытка отправить всё, что накопилось офлайн (удаления → правки → новые
+     * траты — в этом порядке, чтобы не тратить сеть на PUT для записи, которую следом всё
+     * равно удалят), потом — забрать изменения с сервера дельтой и свежий бюджет.
      *
-     * Каждый шаг отправки — лучшая попытка: одна неудавшаяся операция не прерывает ни
-     * остальные операции этого же шага, ни синхронизацию в целом. Она просто остаётся
-     * неотправленной и будет повторена при следующем вызове sync().
-     *
-     * Бросает исключение, только если не удалась сама загрузка изменений с сервера — это
-     * единственный надёжный сигнал "мы сейчас без связи" для экрана.
+     * Каждый шаг отправки — лучшая попытка: одна неудавшаяся операция не прерывает остальные.
+     * Она просто остаётся неотправленной и будет повторена при следующем вызове sync().
+     * Исключение летит, только если не удалась загрузка изменений — это надёжный сигнал
+     * "мы сейчас без связи" для экрана и для WorkManager (он повторит позже сам).
      */
-    suspend fun sync() = syncMutex.withLock {
+    override suspend fun sync() = syncMutex.withLock {
         pushPendingDeletes()
         pushDirty()
         pushUnsynced()
         pullChanges()
+        settings.saveBudget(api.getBudget().monthlyBudget)
     }
 
     /** Добавить трату немедленно в локальный кэш со своим id — экран обновится через Flow. */
-    suspend fun addExpenseOptimistic(amount: Double, category: String, note: String?, tag: String?) {
+    override suspend fun add(amount: Double, category: String, note: String?, tag: String?) {
         val now = LocalDateTime.now().toString()
         dao.upsert(
             ExpenseEntity(
@@ -82,7 +126,7 @@ object ExpensesRepository {
      * правка просто меняет то, что уйдёт вместе с ещё не отправленным POST, без отдельного PUT.
      * Если уже видел — помечаем dirty, чтобы [pushDirty] отправил PUT при следующей sync().
      */
-    suspend fun editExpenseOptimistic(
+    override suspend fun edit(
         id: String,
         amount: Double,
         category: String,
@@ -109,7 +153,7 @@ object ExpensesRepository {
      * ExpenseDao.observeAll). Если сервер её никогда не видел — отправлять DELETE незачем,
      * убираем локально сразу; иначе ждём отправки при следующей sync().
      */
-    suspend fun deleteExpenseOptimistic(id: String) {
+    override suspend fun delete(id: String) {
         val existing = dao.getById(id) ?: return
         if (!existing.synced) {
             dao.deleteById(id)
@@ -118,10 +162,22 @@ object ExpensesRepository {
         }
     }
 
+    override suspend fun setBudget(value: Double?) {
+        val saved = api.setBudget(BudgetDto(value))
+        settings.saveBudget(saved.monthlyBudget)
+    }
+
+    override suspend fun exportCsv(): ByteArray = api.exportCsv().bytes()
+
+    override suspend fun clearLocalData() {
+        dao.deleteAll()
+        settings.clear()
+    }
+
     private suspend fun pushPendingDeletes() {
         for (row in dao.pendingDeletes()) {
             try {
-                val response = ApiClient.api.deleteExpense(row.id)
+                val response = api.deleteExpense(row.id)
                 // 404 — сервер уже не знает об этой трате (например, удалили с другого
                 // клиента раньше нас); наша цель всё равно достигнута.
                 if (response.isSuccessful || response.code() == 404) {
@@ -137,7 +193,7 @@ object ExpensesRepository {
     private suspend fun pushDirty() {
         for (row in dao.dirtyRows()) {
             try {
-                val saved = ApiClient.api.editExpense(
+                val saved = api.editExpense(
                     row.id,
                     UpdateExpense(
                         amount = row.amount,
@@ -157,7 +213,7 @@ object ExpensesRepository {
     private suspend fun pushUnsynced() {
         for (pending in dao.unsynced()) {
             try {
-                val saved = ApiClient.api.addExpense(
+                val saved = api.addExpense(
                     NewExpense(
                         amount = pending.amount,
                         category = pending.category,
@@ -186,11 +242,11 @@ object ExpensesRepository {
      * страница вообще пустая (тогда взять курсор из "последней записи" попросту не из чего).
      */
     private suspend fun pullChanges() {
-        var since = SyncCursorStore.lastSyncedAt
+        var since = settings.syncCursor()
         var lastServerTime: String? = since
         var hasMore = true
         while (hasMore) {
-            val page = ApiClient.api.getExpensesChanges(since = since)
+            val page = api.getExpensesChanges(since = since)
             for (item in page.expenses) {
                 applyServerChange(item)
             }
@@ -198,7 +254,7 @@ object ExpensesRepository {
             since = page.expenses.lastOrNull()?.updatedAt ?: page.serverTime
             hasMore = page.hasMore
         }
-        lastServerTime?.let { SyncCursorStore.save(it) }
+        lastServerTime?.let { settings.saveSyncCursor(it) }
     }
 
     /**

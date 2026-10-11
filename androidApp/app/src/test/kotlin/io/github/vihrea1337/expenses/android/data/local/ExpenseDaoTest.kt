@@ -1,5 +1,6 @@
 package io.github.vihrea1337.expenses.android.data.local
 
+import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
@@ -9,6 +10,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -18,16 +20,21 @@ import kotlin.test.assertTrue
  * Проверяем именно то, от чего зависит офлайн-очередь: неотправленные добавления/правки/
  * удаления видны нужным выборкам и не теряются, а помеченные на удаление сразу пропадают
  * из списка на экране, хоть физически строка ещё в базе.
+ *
+ * @Config(application = Application::class) — подставляем «голый» Application вместо нашего
+ * ExpensesApp: тот помечен @HiltAndroidApp и при старте поднял бы Hilt и WorkManager,
+ * которые тесту базы не нужны.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
 class ExpenseDaoTest {
-    private lateinit var db: RoomExpensesDatabase
+    private lateinit var db: ExpensesDatabase
     private lateinit var dao: ExpenseDao
 
     @Before
     fun setup() {
         // inMemoryDatabaseBuilder — база живёт только в памяти процесса теста, без файла на диске.
-        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), RoomExpensesDatabase::class.java)
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), ExpensesDatabase::class.java)
             .allowMainThreadQueries() // тест синхронный — отдельный поток для БД тут не нужен
             .build()
         dao = db.expenseDao()
@@ -153,3 +160,4 @@ class ExpenseDaoTest {
         assertEquals(original, roundTripped)
     }
 }
+
