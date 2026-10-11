@@ -57,10 +57,17 @@ fun List<Expense>.byCategory(): List<CategoryShare> =
 
 const val UNCATEGORIZED = "без категории"
 
-/** Один столбик графика «по времени»: подпись (день/месяц) и сумма за него. */
-data class TrendBar(val label: String, val amount: Double)
+/**
+ * Один столбик графика «по времени»: короткая подпись под осью («8» или «10.26»), сумма и
+ * полное название для подписи пика («8 октября», «октябрь 2026»).
+ */
+data class TrendBar(val label: String, val amount: Double, val title: String = label)
 
 private val MONTH_FMT = DateTimeFormatter.ofPattern("MM.yy")
+private val RU_LOCALE = java.util.Locale.forLanguageTag("ru")
+private val DAY_TITLE_FMT = DateTimeFormatter.ofPattern("d MMMM", RU_LOCALE)
+// LLLL — месяц в именительном падеже («октябрь»), MMMM дал бы родительный («октября»).
+private val MONTH_TITLE_FMT = DateTimeFormatter.ofPattern("LLLL yyyy", RU_LOCALE)
 
 /**
  * Разбивка трат по времени для графика. Для недели и 30 дней — по дням (7 или 30
@@ -78,7 +85,7 @@ fun List<Expense>.trend(period: Period, today: LocalDate): List<TrendBar> {
         var month = sums.keys.min()
         val last = YearMonth.from(today)
         while (!month.isAfter(last)) {
-            bars += TrendBar(month.format(MONTH_FMT), sums[month] ?: 0.0)
+            bars += TrendBar(month.format(MONTH_FMT), sums[month] ?: 0.0, month.format(MONTH_TITLE_FMT))
             month = month.plusMonths(1)
         }
         return bars
@@ -89,7 +96,7 @@ fun List<Expense>.trend(period: Period, today: LocalDate): List<TrendBar> {
     val sums = dated.filter { !it.first.isBefore(start) }.groupBy { it.first }.mapValues { (_, v) -> v.sumOf { it.second } }
     return (0 until days).map { i ->
         val day = start.plusDays(i.toLong())
-        TrendBar(day.dayOfMonth.toString(), sums[day] ?: 0.0)
+        TrendBar(day.dayOfMonth.toString(), sums[day] ?: 0.0, day.format(DAY_TITLE_FMT))
     }
 }
 

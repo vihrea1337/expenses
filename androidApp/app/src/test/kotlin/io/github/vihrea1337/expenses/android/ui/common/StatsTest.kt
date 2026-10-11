@@ -96,6 +96,7 @@ class StatsTest {
         assertEquals(150.0, bars.last().amount)
         assertEquals(30.0, bars.first { it.label == "7" }.amount)
         assertEquals(0.0, bars.first { it.label == "6" }.amount)
+        assertEquals("11 октября", bars.last().title, "полная дата — для подписи пика")
     }
 
     @Test
@@ -103,6 +104,7 @@ class StatsTest {
         val bars = listOf(e("2026-07-15", 10.0), e("2026-09-01", 20.0)).trend(Period.ALL, today)
         assertEquals(listOf("07.26", "08.26", "09.26", "10.26"), bars.map { it.label })
         assertEquals(listOf(10.0, 0.0, 20.0, 0.0), bars.map { it.amount })
+        assertEquals("июль 2026", bars.first().title)
     }
 
     @Test

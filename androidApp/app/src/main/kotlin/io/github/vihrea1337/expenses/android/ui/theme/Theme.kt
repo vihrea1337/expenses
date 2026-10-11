@@ -30,6 +30,9 @@ internal val LightColors = lightColorScheme(
     secondaryContainer = Color(0xFFDDE6D6),
     onSecondaryContainer = Color(0xFF131F10),
     tertiary = Color(0xFF2A78D6),
+    // Кнопка в снекбаре («Отменить») рисуется цветом inversePrimary — без него Material
+    // берёт свой стандартный фиолетовый, чужой для зелёной темы.
+    inversePrimary = BrandDark,
     background = Color(0xFFF5F7F4),
     surface = Color(0xFFF5F7F4),
     surfaceVariant = Color(0xFFE1E6DC),
@@ -51,6 +54,7 @@ internal val DarkColors = darkColorScheme(
     secondaryContainer = Color(0xFF3B4636),
     onSecondaryContainer = Color(0xFFD9E7D0),
     tertiary = Color(0xFF8AB4F8),
+    inversePrimary = Brand,
     background = Color(0xFF111411),
     surface = Color(0xFF111411),
     surfaceVariant = Color(0xFF2A3127),

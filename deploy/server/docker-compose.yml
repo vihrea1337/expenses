@@ -28,6 +28,10 @@ services:
       DB_URL: jdbc:postgresql://expenses-pg:5432/expenses
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD}
+      # Часовой пояс сервера = пояс пользователей. Время траты сервер ставит сам
+      # (LocalDateTime.now(), без зоны), и в UTC кофе в 09:00 по Екатеринбургу
+      # записывался бы как 04:00 — и в приложении, и на сайте, и в боте.
+      TZ: Asia/Yekaterinburg
     networks: [expenses-net]
 
   caddy:

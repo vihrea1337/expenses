@@ -94,7 +94,8 @@ fun AnalyticsScreen(viewModel: AnalyticsViewModel = hiltViewModel()) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Tile(money(state.total), "потрачено", Modifier.weight(1f))
                 Tile(state.count.toString(), plural(state.count, "трата", "траты", "трат"), Modifier.weight(0.7f))
-                Tile(money(state.perDay), "в день", Modifier.weight(1f))
+                // Среднее — без копеек: «834 ₽ в день» читается лучше, чем «834,17 ₽».
+                Tile(money(Math.round(state.perDay).toDouble()), "в день", Modifier.weight(1f))
             }
 
             ElevatedCard(Modifier.fillMaxWidth()) {
@@ -233,7 +234,7 @@ private fun TrendChart(bars: List<TrendBar>) {
     Text("По времени", style = MaterialTheme.typography.titleMedium)
     if (peak != null && peak.amount > 0) {
         Text(
-            "Пик: ${money(peak.amount)} (${peak.label})",
+            "Пик: ${money(peak.amount)} — ${peak.title}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -259,15 +260,18 @@ private fun TrendChart(bars: List<TrendBar>) {
         }
     }
     Spacer(Modifier.height(4.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        bars.forEachIndexed { i, bar ->
+    // Подписи — по одной на группу из step столбиков, и подпись занимает ширину всей группы.
+    // Раньше каждая подпись была шириной в ОДИН столбик (≈ 10 dp на 30 днях), и «12»
+    // обрезалось до «1» — ось читалась как «1 1 2 2 2…».
+    Row(Modifier.fillMaxWidth()) {
+        bars.chunked(step).forEach { group ->
             Text(
-                if (i % step == 0) bar.label else "",
-                Modifier.weight(1f),
+                group.first().label,
+                Modifier.weight(group.size.toFloat()),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
                 maxLines = 1,
+                softWrap = false,
             )
         }
     }

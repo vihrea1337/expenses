@@ -21,9 +21,16 @@ Solmu **не трогаем** — у Expenses свой отдельный сте
   операции (сборка образа) запускать через `nohup`, SSH-сессию иногда обрывает.
 
 - **APK для скачивания:** `/opt/expenses/downloads/Expenses.apk` — Caddy отдаёт его по
-  `/download/Expenses.apk` (ссылка на странице `/install.html`). Новая сборка: `assembleDebug` →
-  `scp androidApp/app/build/outputs/apk/debug/app-debug.apk solmu-new:/opt/expenses/downloads/Expenses.apk`
-  (перезапуск не нужен; версию в тексте `install.html` поправить вручную).
+  `/download/Expenses.apk` (ссылка на странице `/install.html`). Новая сборка — **только с ПК**
+  (с 2.0): `androidApp> .\gradlew.bat :app:assembleRelease` → сначала копия старого на сервере
+  (`cp downloads/Expenses.apk downloads/Expenses-<версия>.apk.bak`) →
+  `scp androidApp/app/build/outputs/apk/release/app-release.apk solmu-new:/opt/expenses/downloads/Expenses.apk`
+  (перезапуск не нужен; версию в тексте `install.html` поправить и передеплоить бэкенд).
+  Почему с ПК: release подписан отладочным ключом этой машины (`~/.android/debug.keystore`), им же
+  подписаны все прежние APK — Android ставит обновление поверх только с тем же ключом. APK из CI
+  подписан ключом раннера и поверх не встанет. Сверить подпись: `apksigner verify --print-certs`.
+- **Часовой пояс:** у контейнера бэкенда `TZ: Asia/Yekaterinburg` (docker-compose). Время трат сервер
+  ставит сам без зоны — в UTC траты показывались бы на 5 часов раньше.
 
 Обновить бэкенд: `buildFatJar` → `scp backend/build/libs/expenses-backend-all.jar solmu-new:/opt/expenses/backend/`
 → на сервере `cd /opt/expenses && docker compose up -d --build expenses-backend`.

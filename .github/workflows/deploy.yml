@@ -4,8 +4,13 @@ name: Deploy
 # Автоматический деплой на каждый пуш сознательно не делаем: сервер общий с другими
 # проектами, и выкатка должна быть осознанным действием.
 #
-# Что делает: тесты → fat-jar → APK → заливает jar в /opt/expenses/backend и APK в
-# /opt/expenses/downloads → пересобирает только контейнер бэкенда → ждёт /health.
+# Что делает: тесты → fat-jar → заливает jar в /opt/expenses/backend → пересобирает только
+# контейнер бэкенда → ждёт /health.
+#
+# APK отсюда НЕ выкладывается (с версии 2.0): Android ставит обновление поверх, только если
+# новый APK подписан ТЕМ ЖЕ ключом, что и старый. У каждого раннера GitHub свой случайный
+# отладочный ключ — APK из CI не встал бы поверх установленного у пользователей. Release-APK
+# собирается на ПК и заливается вручную (docs/deploy.md).
 #
 # Нужны секреты репозитория (Settings → Secrets and variables → Actions):
 #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (приватный ключ ОТДЕЛЬНОЙ пары только для деплоя),
@@ -51,13 +56,6 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew test buildFatJar --no-daemon
-      - name: Собрать APK
-        if: steps.check.outputs.ready == 'true'
-        working-directory: androidApp
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
       - name: Настроить SSH
         if: steps.check.outputs.ready == 'true'
         run: |
@@ -70,7 +68,6 @@ jobs:
           TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
           scp -i ~/.ssh/deploy backend/build/libs/expenses-backend-all.jar "$TARGET:/opt/expenses/backend/"
-          scp -i ~/.ssh/deploy androidApp/app/build/outputs/apk/debug/app-debug.apk "$TARGET:/opt/expenses/downloads/Expenses.apk"
           ssh -i ~/.ssh/deploy "$TARGET" 'cd /opt/expenses && docker compose up -d --build expenses-backend'
           for i in $(seq 1 40); do
             if curl -fs https://vihreaexpenses.duckdns.org:34443/health; then echo; echo "выкачено"; exit 0; fi

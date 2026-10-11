@@ -59,5 +59,28 @@ Gradle 8.14.3/AGP не собираются — ставь отдельный JD
 - Тулчейн бэкенда: **Kotlin 2.1.0**, **Ktor 3.0.3**, **Gradle 8.14.3** (wrapper), **JDK 21** (Eclipse Temurin — см. выше).
 - Хранилище: **PostgreSQL** через **Exposed**; JSON — kotlinx.serialization.
 
-## Текущее состояние (кратко)
+## Текущее состояние (2026-10-11): Android 2.0.0 выложен
+- **Android 2.0.0** — Hilt, Navigation, WorkManager, DataStore, виджет Glance, ярлык, быстрый ввод
+  «кофе 200» через общий парсер в `shared/`, R8. Release-APK (2,5 МБ) **выложен на сайт**
+  (`/opt/expenses/downloads/Expenses.apk`, старый 1.2.0 — `Expenses-1.2.0.apk.bak` рядом).
+  Подпись — отладочный ключ ПК, та же, что у 1.2.0: встаёт поверх.
+- **Проверено на эмуляторе Pixel_7 (release, боевой сервер):** вход по токену, неверный токен,
+  создание аккаунта, 401 → экран входа, быстрый ввод с подсказками, ИИ-категория, свайп-удаление
+  с «Отменить» (DELETE дошёл), правка (PUT дошёл), серверная правка подтягивается, аналитика,
+  бюджет, профиль, виджет на столе и его «+», ярлык (зарегистрирован), офлайн-трата → WorkManager
+  отправил через 15 с после появления сети, тёмная тема. На реальном телефоне 2.0 ещё не ставили.
+- **Тесты Android:** `:app:testDebugUnitTest` — 54 (JVM), `:app:connectedDebugAndroidTest` — 5 UI.
+  В CI: юнит + release-сборка + UI-тесты на эмуляторе (job `android-ui-tests`).
+- Сервер переведён в `TZ=Asia/Yekaterinburg` (время трат было в UTC).
+- Демо-аккаунт «Тест Демо» — токен только в БД сервера (`expenses-pg`, таблица `users`), в репо не писать.
+- Эмулятор: часы после снапшота могут уехать — холодный старт `emulator -avd Pixel_7 -no-snapshot-load`
+  и `adb shell cmd alarm set-timezone Asia/Yekaterinburg`. `adb input text` не умеет кириллицу.
+- Скриншоты README — `docs/screenshots/` (`adb exec-out screencap -p`, уменьшены до 540×1200).
+
+## Android: команды
+Из `androidApp/` (JDK 21): `.\gradlew.bat :app:testDebugUnitTest`, `:app:connectedDebugAndroidTest`
+(эмулятор Pixel_7; будить экран `adb shell input keyevent KEYCODE_WAKEUP`), `:app:assembleRelease`.
+Debug против локального сервера: `-Pexpenses.baseUrl=http://10.0.2.2:8080/`.
+
+## История (кратко)
 **v1.1 готова и развёрнута.** Три клиента (Android, Telegram-бот, веб-страница) к одному Ktor-бэкенду на VPS с PostgreSQL. Реализовано: быстрый ввод, REST API, **мультипользовательские аккаунты** (токен = аккаунт, изоляция; бот `/token`·`/link`), авторизация bearer-токеном, аналитика по категориям (donut) и **график по времени**, месячный бюджет, ИИ-категоризация трат (Groq), **экспорт CSV**, бот-меню (`setMyCommands`), тесты+CI (парсер, CSV, репозитории на H2). Детали — в `README.md` и `docs/`.

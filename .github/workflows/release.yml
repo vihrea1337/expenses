@@ -1,9 +1,12 @@
 name: Release APK
 
 # Срабатывает при пуше тега вида v1.2.3 (git tag v1.2.3 && git push origin v1.2.3).
-# Собирает debug-APK Android-приложения и прикладывает его файлом к GitHub Release
-# с этим же тегом — чтобы после каждого тега был готовый apk для скачивания,
-# а не только исходный код.
+# Собирает release-APK (R8) и прикладывает его файлом к GitHub Release с этим же тегом —
+# чтобы после каждого тега был готовый apk для скачивания, а не только исходный код.
+#
+# Важно: APK подписан отладочным ключом РАННЕРА, а не тем, что у APK на сайте, — поверх
+# версии с сайта он не встанет (Android требует тот же ключ). Это сборка «посмотреть»;
+# для обновления — APK со страницы /install.html.
 on:
   push:
     tags:
@@ -28,12 +31,12 @@ jobs:
       # Android SDK на раннере уже стоит — просто принимаем лицензии.
       - name: Принять лицензии Android SDK
         run: yes | sdkmanager --licenses > /dev/null || true
-      - name: Собрать APK (debug)
+      - name: Собрать APK (release, R8)
         working-directory: androidApp
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
       - name: Опубликовать APK в GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: androidApp/app/build/outputs/apk/debug/app-debug.apk
+          files: androidApp/app/build/outputs/apk/release/app-release.apk
